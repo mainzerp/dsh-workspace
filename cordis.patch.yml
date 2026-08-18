@@ -1,0 +1,15 @@
+# Harness UI enhancement. webServer is provided by the web profile.
+- insert:
+    - id: dsh-workspace
+      name: 'dsh-workspace'
+      config:
+        baseUrl: https://api.deepseek.com
+        apiKeyEnv: DEEPSEEK_API_KEY
+        timezoneOffsetMinutes: 480
+        balanceTimeoutMs: 5000
+        inspectConcurrency: 8
+        idleStartMinutes: 30
+        idleEndMinutes: 510
+        projectMaxEntries: 2000
+        projectMaxFileBytes: 200000
+        allowRemote: false
