@@ -15,6 +15,7 @@ import { estimateCost } from './pricing.js'
 import { fetchUsageCost } from './usage-cost.js'
 import { ProjectBrowser } from './project-browser.js'
 import { trafficPeriodAt } from './schedule.js'
+import { checkUpdate, relaunchHarness, runHarnessUpdate } from './update.js'
 
 export type * from './types.js'
 export { estimateCost } from './pricing.js'
@@ -28,8 +29,7 @@ export interface Config {
   timezoneOffsetMinutes?: number
   balanceTimeoutMs?: number
   inspectConcurrency?: number
-  idleStartMinutes?: number
-  idleEndMinutes?: number
+  peakWindows?: number[][]
   projectRoot?: string
   projectMaxEntries?: number
   projectMaxFileBytes?: number
@@ -46,8 +46,7 @@ export const Config: z<Config> = z.object({
   timezoneOffsetMinutes: z.number().step(1).min(-720).max(840).default(480),
   balanceTimeoutMs: z.number().step(1).min(1).max(60_000).default(5_000),
   inspectConcurrency: z.number().step(1).min(1).max(64).default(8),
-  idleStartMinutes: z.number().step(1).min(0).max(1_439).default(30),
-  idleEndMinutes: z.number().step(1).min(0).max(1_439).default(510),
+  peakWindows: z.array(z.array(z.number().step(1).min(0).max(1_440))).default([[540, 720], [840, 1_080]]),
   projectRoot: z.string(),
   projectMaxEntries: z.number().step(1).min(100).max(20_000).default(2_000),
   projectMaxFileBytes: z.number().step(1).min(1_024).max(2_000_000).default(200_000),
@@ -129,16 +128,20 @@ export function apply(ctx: Context, config: Config = {}): void {
   const timezoneOffsetMinutes = config.timezoneOffsetMinutes ?? 480
   const balanceTimeoutMs = config.balanceTimeoutMs ?? 5_000
   const inspectConcurrency = config.inspectConcurrency ?? 8
-  const idleStartMinutes = config.idleStartMinutes ?? 30
-  const idleEndMinutes = config.idleEndMinutes ?? 510
+  const peakWindows: [number, number][] = (config.peakWindows ?? [[540, 720], [840, 1_080]]).map(pair => [pair[0], pair[1]] as [number, number])
   const maxEntries = config.projectMaxEntries ?? 2_000
   const maxFileBytes = config.projectMaxFileBytes ?? 200_000
   try { const url = new URL(baseUrl); if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error() } catch { throw new Error('dsh-workspace: baseUrl must be an absolute HTTP(S) URL') }
   if (!Number.isInteger(timezoneOffsetMinutes) || timezoneOffsetMinutes < -720 || timezoneOffsetMinutes > 840) throw new Error('dsh-workspace: timezoneOffsetMinutes must be an integer from -720 through 840')
   if (!Number.isInteger(balanceTimeoutMs) || balanceTimeoutMs < 1 || balanceTimeoutMs > 60_000) throw new Error('dsh-workspace: balanceTimeoutMs must be an integer from 1 through 60000')
   if (!Number.isInteger(inspectConcurrency) || inspectConcurrency < 1 || inspectConcurrency > 64) throw new Error('dsh-workspace: inspectConcurrency must be an integer from 1 through 64')
-  if (!Number.isInteger(idleStartMinutes) || idleStartMinutes < 0 || idleStartMinutes > 1_439) throw new Error('dsh-workspace: idleStartMinutes must be an integer from 0 through 1439')
-  if (!Number.isInteger(idleEndMinutes) || idleEndMinutes < 0 || idleEndMinutes > 1_439 || idleEndMinutes === idleStartMinutes) throw new Error('dsh-workspace: idleEndMinutes must be an integer from 0 through 1439 and differ from idleStartMinutes')
+  let peakWindowJson = ''
+  try { peakWindowJson = JSON.stringify(peakWindows) } catch { peakWindowJson = '' }
+  if (!Array.isArray(peakWindows) || peakWindows.length === 0 || peakWindowJson.length === 0) throw new Error('dsh-workspace: peakWindows must be a non-empty JSON-array list')
+  for (const pair of peakWindows) {
+    const start = pair[0]; const end = pair[1]
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > 1_440 || end < 0 || end > 1_440 || start === end) throw new Error('dsh-workspace: each peakWindow must be an integer [start, end] pair from 0 through 1440 with start !== end')
+  }
   if (!Number.isInteger(maxEntries) || maxEntries < 100 || maxEntries > 20_000) throw new Error('dsh-workspace: projectMaxEntries must be an integer from 100 through 20000')
   if (!Number.isInteger(maxFileBytes) || maxFileBytes < 1_024 || maxFileBytes > 2_000_000) throw new Error('dsh-workspace: projectMaxFileBytes must be an integer from 1024 through 2000000')
   const browsers = new Map<string, Promise<ProjectBrowser>>()
@@ -221,6 +224,11 @@ export function apply(ctx: Context, config: Config = {}): void {
   register('/api/v1/dsh-workspace/project', project => project.snapshot())
   register('/api/v1/dsh-workspace/file', (project, url) => project.read(url.searchParams.get('path') ?? ''))
   register('/api/v1/dsh-workspace/diff', (project, url) => project.diff(url.searchParams.get('path') ?? ''))
+  register('/api/v1/dsh-workspace/logs', (project, url) => {
+    const limit = Number(url.searchParams.get('limit') ?? '50')
+    return project.logs(url.searchParams.get('path') ?? undefined, Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 200) : 50)
+  })
+  register('/api/v1/dsh-workspace/commit', (project, url) => project.show(url.searchParams.get('hash') ?? ''))
 
   ctx.effect(() => webServer.register({
     kind: 'exact', path: '/api/v1/dsh-workspace/summary',
@@ -238,20 +246,61 @@ export function apply(ctx: Context, config: Config = {}): void {
           fetchUsageCost(resolvedApiKey, usageCostUrl, dayStartSeconds, now / 1000, timezoneOffsetMinutes * 60, AbortSignal.timeout(balanceTimeoutMs)),
         ])
         const usage = aggregateToday(logs, now, timezoneOffsetMinutes)
-        const estimate = estimateCost(usage.models)
+        const ratePeriod = trafficPeriodAt(now, timezoneOffsetMinutes, peakWindows)
+        const estimate = estimateCost(usage.models, ratePeriod)
         sendJson(res, 200, {
           generatedAt: Math.floor(now / 1000),
           usage: { ...usage, startTime: Math.floor(usage.startTime / 1000), endTime: Math.floor(usage.endTime / 1000) },
           balance,
           estimatedCost: estimate,
           cost: { total: platformCost ?? estimate.amount, source: platformCost === null ? 'estimate' : 'platform' },
-          ratePeriod: trafficPeriodAt(now, timezoneOffsetMinutes, idleStartMinutes, idleEndMinutes),
-          trafficSchedule: { timezoneOffsetMinutes, idleStartMinutes, idleEndMinutes },
+          ratePeriod,
+          trafficSchedule: { timezoneOffsetMinutes, peakWindows },
         }, requestId)
       } catch (error) {
         ctx.logger.warn(error)
         sendJson(res, 500, { status: 500, reason: 'SUMMARY_FAILED', message: error instanceof Error ? error.message : '读取用量失败', fields: [], requestId }, requestId)
       }
+    },
+  }))
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact', path: '/api/v1/dsh-workspace/update',
+    async handler(req, res) {
+      const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
+      if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: '仅支持 GET 请求', fields: [], requestId }, requestId); return }
+      if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: '更新检查默认仅允许本机读取', fields: [], requestId }, requestId); return }
+      try {
+        sendJson(res, 200, await checkUpdate(), requestId)
+      } catch (error) {
+        ctx.logger.warn(error)
+        sendJson(res, 500, { status: 500, reason: 'UPDATE_CHECK_FAILED', message: error instanceof Error ? error.message : '检查更新失败', fields: [], requestId }, requestId)
+      }
+    },
+  }))
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact', path: '/api/v1/dsh-workspace/update/run',
+    async handler(req, res) {
+      const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
+      if (!requirePost(req, res, requestId, '更新')) return
+      try {
+        sendJson(res, 200, await runHarnessUpdate(), requestId)
+      } catch (error) {
+        ctx.logger.warn(error)
+        sendJson(res, 500, { status: 500, reason: 'UPDATE_RUN_FAILED', message: error instanceof Error ? error.message : '更新失败', fields: [], requestId }, requestId)
+      }
+    },
+  }))
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact', path: '/api/v1/dsh-workspace/update/restart',
+    async handler(req, res) {
+      const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
+      if (!requirePost(req, res, requestId, '重启')) return
+      sendJson(res, 200, { ok: true }, requestId)
+      relaunchHarness()
+      setTimeout(() => process.exit(0), 1_000)
     },
   }))
 
