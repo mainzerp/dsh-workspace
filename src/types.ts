@@ -32,6 +32,21 @@ export interface ProjectFilePreview {
 /** Git diff preview response. */
 export interface GitDiffPreview { path: string; diff: string; truncated: boolean }
 
+/** One commit in the project history. */
+export interface GitLogEntry {
+  hash: string
+  shortHash: string
+  author: string
+  timestamp: number
+  subject: string
+}
+
+/** Bounded git commit history response. */
+export interface GitLogPreview { entries: GitLogEntry[] }
+
+/** One commit's text diff preview. */
+export interface GitCommitPreview { hash: string; diff: string; truncated: boolean }
+
 /** Token counters accumulated for one range or model. */
 export interface UsageTokenTotals {
   inputTokens: number
@@ -80,6 +95,21 @@ export interface UsageCostSnapshot {
   source: 'platform' | 'estimate'
 }
 
+/** Harness update check response. */
+export interface UpdateCheck {
+  currentVersion: string | null
+  latestVersion: string | null
+  outdated: boolean
+  checkedAt: number
+  error: string | null
+}
+
+/** Harness update execution result. */
+export interface UpdateRunResult {
+  ok: boolean
+  message: string
+}
+
 /** Self-contained dsh-workspace summary response. */
 export interface UsageSnapshot {
   generatedAt: number
@@ -90,7 +120,6 @@ export interface UsageSnapshot {
   ratePeriod: 'idle' | 'peak'
   trafficSchedule: {
     timezoneOffsetMinutes: number
-    idleStartMinutes: number
-    idleEndMinutes: number
+    peakWindows: readonly (readonly [number, number])[]
   }
 }
