@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { access, open, readdir, realpath } from 'node:fs/promises'
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import type { GitChange, GitDiffPreview, ProjectFilePreview, ProjectSnapshot, ProjectTreeEntry } from './types.js'
+import type { GitChange, GitCommitPreview, GitDiffPreview, GitLogPreview, ProjectFilePreview, ProjectSnapshot, ProjectTreeEntry } from './types.js'
 
 const execFileAsync = promisify(execFile)
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'lib', 'coverage', '.next', '.cache'])
@@ -119,5 +119,28 @@ export class ProjectBrowser {
     }
     const encoded = Buffer.from(diff)
     return { path: target.path, diff: encoded.subarray(0, this.#maxFileBytes).toString('utf8'), truncated: encoded.byteLength > this.#maxFileBytes }
+  }
+
+  /** @param input optional relative file path to filter history. @param limit max commits. @returns bounded commit history. */
+  async logs(input: string | undefined, limit: number): Promise<GitLogPreview> {
+    const args = ['log', `--pretty=format:%H%x1f%an%x1f%at%x1f%s`, '-n', String(limit)]
+    if (input !== undefined && input.length > 0) {
+      const target = await this.#resolveFile(input)
+      args.push('--', target.path)
+    }
+    const stdout = await this.#git(args)
+    const entries = stdout.split('\n').filter(Boolean).map(line => {
+      const [hash, author, timestamp, subject] = line.split('\x1f')
+      return { hash: hash ?? '', shortHash: (hash ?? '').slice(0, 8), author: author ?? '', timestamp: Number(timestamp ?? 0), subject: subject ?? '' }
+    })
+    return { entries }
+  }
+
+  /** @param hash commit id. @returns bounded text diff of one commit. */
+  async show(hash: string): Promise<GitCommitPreview> {
+    if (!/^[0-9a-f]{4,40}$/i.test(hash)) throw new Error('提交标识无效')
+    const stdout = await this.#git(['show', '--no-ext-diff', '--format=', hash])
+    const encoded = Buffer.from(stdout)
+    return { hash, diff: encoded.subarray(0, this.#maxFileBytes).toString('utf8'), truncated: encoded.byteLength > this.#maxFileBytes }
   }
 }
