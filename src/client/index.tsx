@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { ComponentType, PointerEvent as ReactPointerEvent } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
-import { Activity, Blocks, ChevronDown, ChevronRight, Eraser, FolderTree, GitBranch, RefreshCw, Terminal, X } from 'lucide-react'
+import { Activity, Blocks, ChevronDown, ChevronRight, Database, Eraser, FileArchive, FileAudio, FileCode, FileImage, FileSpreadsheet, FileText, FileVideo, Folder, FolderOpen, FolderTree, GitBranch, RefreshCw, Terminal, X } from 'lucide-react'
+import { SiC, SiCplusplus, SiCss, SiGnubash, SiGo, SiHtml5, SiJavascript, SiJson, SiMarkdown, SiOpenjdk, SiPython, SiRust, SiSqlite, SiSvelte, SiTypescript, SiVuedotjs, SiYaml } from 'react-icons/si'
 import type { LanguageFn } from 'highlight.js'
 import hljs from 'highlight.js/lib/core'
 import bashLang from 'highlight.js/lib/languages/bash'
@@ -20,7 +21,8 @@ import sqlLang from 'highlight.js/lib/languages/sql'
 import typescriptLang from 'highlight.js/lib/languages/typescript'
 import xmlLang from 'highlight.js/lib/languages/xml'
 import yamlLang from 'highlight.js/lib/languages/yaml'
-import type { GitDiffPreview, ProjectFilePreview, ProjectSnapshot, UsageSnapshot } from '../types.js'
+import type { GitCommitPreview, GitDiffPreview, GitLogEntry, GitLogPreview, ProjectFilePreview, ProjectSnapshot, UpdateCheck, UpdateRunResult, UsageSnapshot } from '../types.js'
+import { FAVICON_SRC } from './favicon.js'
 
 const HIGHLIGHT_LANGUAGES: ReadonlyArray<readonly [string, LanguageFn]> = [
   ['bash', bashLang], ['c', cLang], ['cpp', cppLang], ['css', cssLang], ['go', goLang],
@@ -47,6 +49,45 @@ function hljsLanguageOf(path: string): string | undefined {
   return HLJS_BY_EXTENSION[extension]
 }
 
+type FileIconComponent = ComponentType<{ size?: number | string }>
+
+const FILE_ICONS: Readonly<Record<string, FileIconComponent>> = {
+  js: SiJavascript, jsx: SiJavascript, mjs: SiJavascript, cjs: SiJavascript,
+  ts: SiTypescript, tsx: SiTypescript,
+  py: SiPython, go: SiGo, rs: SiRust, java: SiOpenjdk,
+  c: SiC, h: SiC, cpp: SiCplusplus, hpp: SiCplusplus, cc: SiCplusplus, hh: SiCplusplus,
+  html: SiHtml5, css: SiCss, scss: SiCss,
+  vue: SiVuedotjs, svelte: SiSvelte,
+  sh: SiGnubash, bash: SiGnubash, zsh: SiGnubash,
+  json: SiJson, jsonc: SiJson, yml: SiYaml, yaml: SiYaml,
+  md: SiMarkdown, mdx: SiMarkdown, txt: FileText,
+  ps1: FileCode, sql: FileCode, toml: FileCode, xml: FileCode,
+  sqlite: SiSqlite, sqlite3: SiSqlite, db: Database,
+  png: FileImage, jpg: FileImage, jpeg: FileImage, gif: FileImage, webp: FileImage, svg: FileImage, bmp: FileImage, ico: FileImage,
+  zip: FileArchive, tar: FileArchive, gz: FileArchive, '7z': FileArchive, rar: FileArchive,
+  csv: FileSpreadsheet, xlsx: FileSpreadsheet, xls: FileSpreadsheet, tsv: FileSpreadsheet,
+  mp3: FileAudio, wav: FileAudio, ogg: FileAudio, flac: FileAudio, m4a: FileAudio,
+  mp4: FileVideo, mkv: FileVideo, avi: FileVideo, mov: FileVideo, webm: FileVideo,
+}
+
+const BRAND_COLORS: Readonly<Record<string, string>> = {
+  go: '#00ADD8', py: '#3776AB',
+  c: '#A8B9CC', h: '#A8B9CC', cpp: '#00599C', hpp: '#00599C', cc: '#00599C', hh: '#00599C',
+  js: '#F7DF1E', jsx: '#F7DF1E', mjs: '#F7DF1E', cjs: '#F7DF1E', ts: '#3178C6', tsx: '#3178C6',
+  html: '#E34F26', css: '#663399', scss: '#663399',
+  vue: '#4FC08D', svelte: '#FF3E00',
+  sh: '#4EAA25', bash: '#4EAA25', zsh: '#4EAA25',
+  yml: '#CB171E', yaml: '#CB171E',
+  sqlite: '#003B57', sqlite3: '#003B57',
+}
+
+function FileTypeIcon({ path }: { path: string }) {
+  const extension = path.split('.').at(-1)?.toLowerCase() ?? ''
+  const Icon = FILE_ICONS[extension] ?? FileText
+  const color = BRAND_COLORS[extension]
+  return color === undefined ? <Icon size={13} /> : <Icon size={13} color={color} />
+}
+
 function escapeHtml(input: string): string {
   return input
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -69,8 +110,8 @@ interface ClientContext { slots: SlotsService; sessions: SessionsService; effect
 type EditorPresentation = 'code' | 'diff' | 'json' | 'markdown' | 'image' | 'text' | 'binary'
 const CODE_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'css', 'scss', 'html', 'vue', 'svelte', 'py', 'go', 'rs', 'java', 'c', 'h', 'cpp', 'hpp', 'sh', 'bash', 'zsh', 'ps1', 'sql', 'yml', 'yaml', 'toml', 'xml'])
 
-function presentationOf(path: string, source: 'file' | 'diff', binary: boolean, dataUrl: string | undefined): EditorPresentation {
-  if (source === 'diff') return 'diff'
+function presentationOf(path: string, source: 'file' | 'diff' | 'commit', binary: boolean, dataUrl: string | undefined): EditorPresentation {
+  if (source === 'diff' || source === 'commit') return 'diff'
   if (dataUrl !== undefined) return 'image'
   if (binary) return 'binary'
   const extension = path.split('.').at(-1)?.toLowerCase() ?? ''
@@ -81,6 +122,16 @@ function presentationOf(path: string, source: 'file' | 'diff', binary: boolean, 
 
 function formattedJson(content: string): string {
   try { return JSON.stringify(JSON.parse(content), null, 2) } catch { return content }
+}
+
+function commitTime(timestamp: number): string {
+  const elapsed = Math.max(0, Date.now() / 1000 - timestamp)
+  if (elapsed < 60) return '刚刚'
+  if (elapsed < 3_600) return `${Math.floor(elapsed / 60)} 分钟前`
+  if (elapsed < 86_400) return `${Math.floor(elapsed / 3_600)} 小时前`
+  if (elapsed < 7 * 86_400) return `${Math.floor(elapsed / 86_400)} 天前`
+  const date = new Date(timestamp * 1000)
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
 }
 
 function CodePreview({ content, diff = false, language }: { content: string; diff?: boolean; language?: string | undefined }) {
@@ -195,10 +246,13 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
   const [mode, setMode] = useState<'files' | 'changes' | 'terminal'>('files')
   const [selected, setSelected] = useState<string | null>(null)
   const [preview, setPreview] = useState('')
-  const [previewSource, setPreviewSource] = useState<'file' | 'diff'>('file')
+  const [previewSource, setPreviewSource] = useState<'file' | 'diff' | 'commit'>('file')
   const [previewBinary, setPreviewBinary] = useState(false)
   const [previewDataUrl, setPreviewDataUrl] = useState<string | undefined>(undefined)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [changesOpen, setChangesOpen] = useState(true)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [gitLog, setGitLog] = useState<GitLogEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [drawerWidth, setDrawerWidth] = useState<number | null>(null)
   const effectiveWidth = drawerWidth ?? (selected === null ? 400 : null)
@@ -245,6 +299,7 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     setPreviewBinary(false)
     setPreviewDataUrl(undefined)
     setExpanded(new Set())
+    setGitLog(null)
   }, [sessionId])
   const open = useCallback((path: string, kind: 'file' | 'diff') => {
     setSelected(path); setPreview('正在读取…'); setPreviewSource(kind); setPreviewBinary(false); setPreviewDataUrl(undefined)
@@ -270,6 +325,30 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
       return next
     })
   }, [])
+  const loadHistory = useCallback(() => {
+    const params = new URLSearchParams()
+    if (sessionId !== undefined) params.set('sessionId', sessionId)
+    if (cwd !== undefined) params.set('cwd', cwd)
+    const query = params.size === 0 ? '' : `?${params.toString()}`
+    void fetch(`/api/v1/dsh-workspace/logs${query}`).then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json() as GitLogPreview
+      setGitLog(data.entries)
+    }).catch(reason => { setGitLog([]); setError(reason instanceof Error ? reason.message : String(reason)) })
+  }, [cwd, sessionId])
+  const openCommit = useCallback((hash: string) => {
+    setSelected(hash); setPreview('正在读取…'); setPreviewSource('commit'); setPreviewBinary(false); setPreviewDataUrl(undefined)
+    const params = new URLSearchParams({ hash })
+    if (sessionId !== undefined) params.set('sessionId', sessionId)
+    if (cwd !== undefined) params.set('cwd', cwd)
+    void fetch(`/api/v1/dsh-workspace/commit?${params.toString()}`).then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return await response.json() as GitCommitPreview
+    }).then(data => setPreview((data.diff || '该提交没有可显示的文本差异') + (data.truncated ? '\n\n…预览已截断' : ''))).catch(reason => setPreview(`读取失败：${reason instanceof Error ? reason.message : String(reason)}`))
+  }, [cwd, sessionId])
+  useEffect(() => {
+    if (mode === 'changes' && historyOpen) loadHistory()
+  }, [historyOpen, loadHistory, mode])
   const entries = snapshot?.entries ?? []
   const visibleEntries = entries.filter(entry => {
     const segments = entry.path.split('/')
@@ -289,17 +368,23 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
       <nav className="hui-activity" aria-label="项目视图"><button type="button" aria-label="资源管理器" title="资源管理器" data-active={mode === 'files' || undefined} onClick={() => setMode('files')}><FolderTree size={20} /></button><button type="button" aria-label="源代码管理" title="源代码管理" data-active={mode === 'changes' || undefined} onClick={() => setMode('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button></nav>
       <section className="hui-explorer">
         <header><strong>{mode === 'files' ? '资源管理器' : mode === 'changes' ? '源代码管理' : '终端'}</strong>{mode !== 'terminal' ? <button type="button" onClick={refresh} aria-label="刷新"><RefreshCw size={15} /></button> : null}</header>
-        {mode === 'terminal' ? <TerminalPanel sessionId={sessionId} cwd={cwd} /> : <>
-        <div className="hui-section-title"><ChevronDown size={14} /><b>{mode === 'files' ? snapshot?.rootName?.toUpperCase() ?? 'PROJECT' : 'CHANGES'}</b>{mode === 'changes' ? <em>{snapshot?.changes.length ?? 0}</em> : null}</div>
-        <div className="hui-tree" role={mode === 'files' ? 'tree' : undefined}>
-          {mode === 'files' ? visibleEntries.map(entry => entry.kind === 'directory'
-            ? <button type="button" role="treeitem" aria-expanded={expanded.has(entry.path)} key={entry.path} className="hui-tree-row" style={{ paddingLeft: 7 + Math.min(entry.depth, 12) * 13 }} title={entry.path} onClick={() => toggleDirectory(entry.path)}><span className="hui-chevron">{expanded.has(entry.path) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span><span>{entry.name}</span></button>
-            : <button type="button" role="treeitem" key={entry.path} className="hui-tree-row" data-selected={selected === entry.path || undefined} style={{ paddingLeft: 20 + Math.min(entry.depth, 12) * 13 }} title={entry.path} onClick={() => open(entry.path, 'file')}><span>{entry.name}</span></button>)
-            : snapshot?.changes.map(change => <button type="button" key={`${change.status}:${change.path}`} className="hui-tree-row hui-change" data-selected={selected === change.path || undefined} title={change.path} onClick={() => open(change.path, 'diff')}><span>{change.path.split('/').at(-1)}</span><small>{change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : ''}</small><b data-status={change.status}>{change.status}</b></button>)}
+        {mode === 'terminal' ? <TerminalPanel sessionId={sessionId} cwd={cwd} /> : mode === 'files' ? <>
+        <div className="hui-section-title"><ChevronDown size={14} /><b>{snapshot?.rootName?.toUpperCase() ?? 'PROJECT'}</b></div>
+        <div className="hui-tree" role="tree">
+          {visibleEntries.map(entry => entry.kind === 'directory'
+            ? <button type="button" role="treeitem" aria-expanded={expanded.has(entry.path)} key={entry.path} className="hui-tree-row" style={{ paddingLeft: 7 + Math.min(entry.depth, 12) * 13 }} title={entry.path} onClick={() => toggleDirectory(entry.path)}><span className="hui-chevron">{expanded.has(entry.path) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>{expanded.has(entry.path) ? <FolderOpen className="hui-folder-icon" size={13} /> : <Folder className="hui-folder-icon" size={13} />}<span>{entry.name}</span></button>
+            : <button type="button" role="treeitem" key={entry.path} className="hui-tree-row" data-selected={selected === entry.path || undefined} style={{ paddingLeft: 20 + Math.min(entry.depth, 12) * 13 }} title={entry.path} onClick={() => open(entry.path, 'file')}><FileTypeIcon path={entry.path} /><span>{entry.name}</span></button>)}
           {snapshot?.truncated ? <p>文件较多，列表已截断</p> : null}
-          {mode === 'changes' && snapshot?.gitAvailable === false ? <div className="hui-empty-small">当前目录不是 Git 仓库</div> : null}
-          {mode === 'changes' && snapshot?.gitAvailable && snapshot.changes.length === 0 ? <div className="hui-empty-small">没有待处理的更改</div> : null}
         </div>
+        </> : <>
+        <div className="hui-section-title" role="button" title={changesOpen ? '折叠更改列表' : '展开更改列表'} onClick={() => setChangesOpen(current => !current)}>{changesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<b>CHANGES</b><em>{snapshot?.changes.length ?? 0}</em></div>
+        {changesOpen ? <div className="hui-tree">
+          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">当前目录不是 Git 仓库</div> : snapshot?.gitAvailable && snapshot.changes.length === 0 ? <div className="hui-empty-small">没有待处理的更改</div> : snapshot?.changes.map(change => <button type="button" key={`${change.status}:${change.path}`} className="hui-tree-row hui-change" data-selected={selected === change.path || undefined} title={change.path} onClick={() => open(change.path, 'diff')}><span>{change.path.split('/').at(-1)}</span><small>{change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : ''}</small><b data-status={change.status}>{change.status}</b></button>)}
+        </div> : null}
+        <div className="hui-section-title" role="button" title={historyOpen ? '折叠提交历史' : '展开提交历史'} onClick={() => setHistoryOpen(current => !current)}>{historyOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<b>HISTORY</b><em>{gitLog?.length ?? 0}</em></div>
+        {historyOpen ? <div className="hui-tree">
+          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">当前目录不是 Git 仓库</div> : gitLog === null ? <div className="hui-empty-small">正在读取历史…</div> : gitLog.length === 0 ? <div className="hui-empty-small">没有提交记录</div> : gitLog.map(entry => <button type="button" key={entry.hash} className="hui-tree-row hui-commit" data-selected={selected === entry.hash || undefined} title={`${entry.subject}\n${entry.author}\n${new Date(entry.timestamp * 1000).toLocaleString()}`} onClick={() => openCommit(entry.hash)}><span className="hui-commit-meta"><b>{entry.shortHash}</b><small>{commitTime(entry.timestamp)}</small></span><span>{entry.subject}</span></button>)}
+        </div> : null}
         </>}
       </section>
       {selected !== null && mode !== 'terminal' ? <section className="hui-editor">
@@ -324,8 +409,10 @@ function HarnessSummary({ wide, sessions }: { wide: boolean; sessions: SessionsS
     const load = () => void fetch('/api/v1/dsh-workspace/summary', { signal: controller.signal })
       .then(async response => response.ok ? await response.json() as UsageSnapshot : null)
       .then(value => { if (value !== null) setSnapshot(value) }).catch(() => undefined)
-    load(); const timer = window.setInterval(load, 60_000)
-    return () => { controller.abort(); window.clearInterval(timer) }
+    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    load(); const timer = window.setInterval(load, 30_000)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
   const balance = snapshot?.balance.balances.find(item => item.currency === 'CNY') ?? snapshot?.balance.balances[0]
   const cost = snapshot?.cost ?? (snapshot === null ? undefined : { total: snapshot.estimatedCost.amount, source: 'estimate' as const })
@@ -334,9 +421,67 @@ function HarnessSummary({ wide, sessions }: { wide: boolean; sessions: SessionsS
   const balanceTone = Number.isFinite(balanceAmount) && balanceAmount <= 10 ? 'danger' : 'safe'
   const period = snapshot?.ratePeriod ?? 'idle'
   return <div className={`hui-summary${wide ? '' : ' rail'}`}>
-    <div className="hui-summary-main" aria-label="Harness 状态" title={snapshot?.balance.error}><span className="hui-icon"><Activity size={12} /></span>{wide ? <span className="hui-content"><span className="hui-metrics"><span><small>余额</small><b data-tone={balanceTone}>{balanceValue}</b></span><span><small>今日</small><b title={cost?.source === 'estimate' ? '官方接口不可用，按本地估算' : 'DeepSeek 平台账单'}>¥{cost ? cost.total.toFixed(3) : '—'}</b></span></span><span className="hui-period" data-period={period}><i />{period === 'idle' ? '空闲' : '高峰'}</span></span> : null}</div>
+    <div className="hui-summary-main" aria-label="Harness 状态" title={snapshot?.balance.error}><span className="hui-icon"><Activity size={12} /></span>{wide ? <span className="hui-content"><span className="hui-main-row"><span className="hui-metrics"><span><small>余额</small><b data-tone={balanceTone}>{balanceValue}</b></span><span><small>今日</small><b title={cost?.source === 'estimate' ? '官方接口不可用，按本地估算' : 'DeepSeek 平台账单'}>¥{cost ? cost.total.toFixed(3) : '—'}</b></span></span><span className="hui-period" data-period={period}><i />{period === 'idle' ? '空闲' : '高峰'}</span></span></span> : null}</div>
     <ProjectDrawer sessionId={sessionId} cwd={cwd} />
   </div>
+}
+
+function HarnessUpdate({ wide }: { wide: boolean }) {
+  const [update, setUpdate] = useState<UpdateCheck | null>(null)
+  const [updating, setUpdating] = useState<'idle' | 'running' | 'ok' | 'error'>('idle')
+  const [updateMessage, setUpdateMessage] = useState('')
+  const [transitioning, setTransitioning] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    const load = () => void fetch('/api/v1/dsh-workspace/update', { signal: controller.signal })
+      .then(async response => response.ok ? await response.json() as UpdateCheck : null)
+      .then(value => { if (value !== null) setUpdate(value) }).catch(() => undefined)
+    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    load(); const timer = window.setInterval(load, 10 * 60 * 1000)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [])
+  const runUpdate = useCallback(() => {
+    setUpdating('running')
+    setUpdateMessage('')
+    void fetch('/api/v1/dsh-workspace/update/run', { method: 'POST' })
+      .then(async response => response.ok ? await response.json() as UpdateRunResult : null)
+      .then(result => {
+        if (result !== null) {
+          setUpdating(result.ok ? 'ok' : 'error')
+          setUpdateMessage(result.message)
+          if (result.ok) {
+            setTransitioning(true)
+            void fetch('/api/v1/dsh-workspace/update/restart', { method: 'POST' }).catch(() => undefined)
+            setTimeout(() => {
+              let attempts = 0
+              const probe = () => {
+                void fetch('/api/v1/dsh-workspace/update', { signal: AbortSignal.timeout(3_000) })
+                  .then(response => { if (response.ok) window.location.reload() })
+                  .catch(() => undefined)
+                  .finally(() => { if (attempts < 60) { attempts += 1; setTimeout(probe, 2_000) } })
+              }
+              probe()
+            }, 3_000)
+          }
+        } else {
+          setUpdating('error')
+          setUpdateMessage('更新失败，请重试')
+        }
+      })
+      .catch(() => { setUpdating('error'); setUpdateMessage('更新失败，请重试') })
+  }, [])
+  const currentVersion = update?.currentVersion ?? null
+  const outdated = update?.outdated === true && update.latestVersion !== null
+  if (!wide || currentVersion === null) return null
+  return <>
+    <div className="hui-update-bar" data-outdated={outdated || undefined}>
+      <span>{outdated ? `有新版：v${update.latestVersion}` : `Harness v${currentVersion}`}</span>
+      {outdated ? <button type="button" className="hui-update-btn" disabled={updating === 'running'} onClick={runUpdate}>{updating === 'running' ? '更新中…' : '更新'}</button> : null}
+      {updating === 'idle' ? null : <em title={updateMessage}>{updateMessage}</em>}
+    </div>
+    {transitioning ? <div className="hui-transition" aria-hidden="true"><img src={FAVICON_SRC} alt="" /></div> : null}
+  </>
 }
 
 const STYLE_ID = 'dsh-workspace-styles'
@@ -345,10 +490,10 @@ div:has(> [data-slot='sidebar.footer.action']){flex-wrap:wrap}.hui-summary{posit
 `
 
 const STATUS_STYLES = `
-.hui-content{display:flex;align-items:center;width:100%;min-width:0;gap:8px;margin-left:8px}.hui-content .hui-metrics{display:flex;width:auto;min-width:0;flex:1;gap:10px;margin-left:0}.hui-content .hui-metrics>span{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:0}.hui-metrics b[data-tone=safe]{color:var(--dsw-alias-label-success,#16895a)}.hui-metrics b[data-tone=danger]{color:var(--dsw-alias-label-error,#d94a4a)}.hui-period{display:inline-flex;flex:none;align-items:center;gap:4px;font-size:11px;font-weight:600}.hui-period>i{width:7px;height:7px;border-radius:50%;background:currentColor}.hui-period[data-period=idle]{color:var(--dsw-alias-label-success,#16895a)}.hui-period[data-period=peak]{color:var(--dsw-alias-label-error,#d94a4a)}
+.hui-content{display:flex;flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:3px;margin-left:8px}.hui-main-row{display:flex;align-items:center;min-width:0;gap:8px}.hui-content .hui-metrics{display:flex;width:auto;min-width:0;flex:1;gap:10px;margin-left:0}.hui-content .hui-metrics>span{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:0}.hui-metrics b[data-tone=safe]{color:var(--dsw-alias-label-success,#16895a)}.hui-metrics b[data-tone=danger]{color:var(--dsw-alias-label-error,#d94a4a)}.hui-period{display:inline-flex;flex:none;align-items:center;gap:4px;font-size:11px;font-weight:600}.hui-period>i{width:7px;height:7px;border-radius:50%;background:currentColor}.hui-period[data-period=idle]{color:var(--dsw-alias-label-success,#16895a)}.hui-period[data-period=peak]{color:var(--dsw-alias-label-error,#d94a4a)}.hui-update-bar{display:flex;align-items:center;gap:6px;width:100%;min-width:0;padding:4px 8px;overflow:hidden;border-radius:8px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-success,#16895a);font-size:10px;line-height:1;white-space:nowrap}.hui-update-bar[data-outdated]{color:var(--dsw-alias-label-error,#d94a4a);font-size:12px;font-weight:700}.hui-update-btn{flex:none;display:inline-flex;align-items:center;height:18px;padding:0 9px;border:0;border-radius:9px;background:var(--dsw-alias-label-error,#d94a4a);color:#fff;font-family:inherit;font-size:10px;font-weight:600;line-height:1;cursor:pointer}.hui-update-btn:hover:not(:disabled){filter:brightness(1.1)}.hui-update-btn:disabled{opacity:.55;cursor:default}.hui-update-bar em{flex:none;max-width:96px;overflow:hidden;color:var(--dsw-alias-label-tertiary,#8a93a5);font-size:9px;font-style:normal;font-weight:400;text-overflow:ellipsis;white-space:nowrap}.hui-transition{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-base,#fff)}.hui-transition img{width:96px;height:96px;animation:hui-breathe 2.4s ease-in-out infinite}@keyframes hui-breathe{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.12);opacity:1}}
 .hui-drawer{top:0;right:0;bottom:0;width:var(--hui-drawer-width,clamp(600px,46vw,780px));max-width:calc(100vw - 24px);border:0;border-left:1px solid var(--dsw-alias-border-l1,#c7ccd5);border-radius:0;box-shadow:-8px 0 28px #0000001c;background:var(--dsw-alias-bg-base,#f8f8f8);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.hui-resizer{position:absolute;left:0;top:0;bottom:0;z-index:5;width:5px;cursor:col-resize;touch-action:none}.hui-resizer:hover,.hui-resizer:active{background:var(--dsw-alias-brand-primary,#4d6bfe)}.hui-titlebar{display:flex;align-items:center;justify-content:space-between;height:35px;padding:0 8px;border-bottom:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-module-platform,#f3f3f3);user-select:none}.hui-titlebar>div{display:flex;min-width:0;align-items:center;gap:8px}.hui-titlebar span:last-child{min-width:0;flex:1;overflow:hidden;color:var(--dsw-alias-label-tertiary,#858585);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.hui-vscode-mark{display:grid;width:20px;height:20px;flex:none;place-items:center;border-radius:3px;background:#007acc;color:#fff;font-size:11px;font-weight:700}.hui-titlebar button,.hui-explorer>header button{display:grid;width:26px;height:25px;place-items:center;border:0;border-radius:4px;background:transparent;color:inherit;font:16px/1 sans-serif;cursor:pointer}.hui-titlebar button:hover,.hui-explorer>header button:hover{background:var(--dsw-alias-interactive-bg-hover,#e5e5e5)}
 .hui-workbench{display:grid;grid-template-columns:46px minmax(0,1fr);min-height:0;flex:1}.hui-workbench[data-preview]{grid-template-columns:46px 238px minmax(0,1fr)}.hui-activity{display:flex;flex-direction:column;align-items:stretch;border-right:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-module-platform,#f3f3f3)}.hui-activity button{position:relative;display:grid;height:48px;place-items:center;border:0;border-left:2px solid transparent;background:transparent;color:var(--dsw-alias-label-tertiary,#7a7a7a);cursor:pointer}.hui-activity button:hover{color:var(--dsw-alias-label-primary,#222)}.hui-activity button[data-active]{border-left-color:#007acc;color:var(--dsw-alias-label-primary,#222)}.hui-activity button>svg{width:20px;height:20px}.hui-activity button>b{position:absolute;top:6px;right:5px;display:grid;min-width:16px;height:16px;padding:0 4px;place-items:center;border-radius:8px;background:#007acc;color:#fff;font-size:9px}
-.hui-explorer{display:flex;min-width:0;min-height:0;flex-direction:column;border-right:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-base,#f8f8f8)}.hui-explorer>header{display:flex;align-items:center;justify-content:space-between;height:42px;padding:0 10px 0 16px}.hui-explorer>header strong{font-size:11px;font-weight:400;letter-spacing:.6px;text-transform:uppercase}.hui-section-title{display:flex;align-items:center;height:23px;padding:0 8px 0 4px;background:var(--dsw-alias-interactive-bg-hover,#e8e8e8);font-size:11px;user-select:none}.hui-section-title>svg{flex:none}.hui-section-title>b{overflow:hidden;flex:1;text-overflow:ellipsis;white-space:nowrap}.hui-section-title>em{display:grid;min-width:17px;height:17px;padding:0 4px;place-items:center;border-radius:9px;background:var(--dsw-alias-label-tertiary,#858585);color:var(--dsw-alias-bg-base,#fff);font-size:9px;font-style:normal}.hui-tree{min-height:0;overflow:auto;padding:3px 0 10px}.hui-terminal{display:flex;min-width:0;min-height:0;flex:1;flex-direction:column;background:var(--dsw-alias-bg-base,#f8f8f8);color:var(--dsw-alias-label-primary,#172033);font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:12px;line-height:1.6}.hui-term-toolbar{display:flex;align-items:center;justify-content:space-between;height:31px;padding:0 8px;border-bottom:1px solid var(--dsw-alias-border-l2,#e4e8f0);background:var(--dsw-alias-bg-module-platform,#fafbfc);color:var(--dsw-alias-label-secondary,#6c768a);font-size:11px;user-select:none}.hui-term-toolbar>span{display:flex;align-items:center;gap:5px}.hui-term-actions{display:flex;align-items:center;gap:2px}.hui-term-toolbar button{display:grid;width:20px;height:20px;place-items:center;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer}.hui-term-toolbar button:hover{background:var(--dsw-alias-interactive-bg-hover,#eef0f4);color:var(--dsw-alias-label-primary,#172033)}.hui-term-screen{position:relative;min-width:0;min-height:0;flex:1;overflow:hidden;padding:4px 0 4px 6px}.hui-term-screen .xterm{height:100%}.hui-term-screen .xterm-viewport{overflow-y:auto}.hui-term-screen .xterm-rows{color:inherit}.hui-tree-row{display:flex;width:100%;height:23px;align-items:center;gap:4px;padding:0 8px;overflow:hidden;border:0;background:transparent;color:inherit;text-align:left;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:default}.hui-tree-row:hover{background:var(--dsw-alias-interactive-bg-hover,#e8e8e8)}.hui-tree-row[data-selected]{background:#007acc26;outline:1px solid #007acc55;outline-offset:-1px}.hui-tree-row>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hui-chevron{display:flex;width:14px;flex:none;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary,#666)}.hui-folder{width:14px;flex:none;color:#dcb67a;font-size:11px}.hui-file{width:14px;flex:none;color:#6a9fb5;font-size:13px}.hui-change{padding-left:12px;cursor:pointer}.hui-change>span:first-child{overflow:hidden;min-width:0;text-overflow:ellipsis;white-space:nowrap}.hui-change>small{overflow:hidden;flex:1;color:var(--dsw-alias-label-tertiary,#858585);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.hui-change>b{margin-left:auto;color:#d19a66;font-size:10px}.hui-change>b[data-status^=M]{color:#d7ba7d}.hui-change>b[data-status^=A],.hui-change>b[data-status^=?]{color:#73c991}.hui-change>b[data-status^=D]{color:#f48771}.hui-tree>p,.hui-empty-small{padding:12px 16px;color:var(--dsw-alias-label-tertiary,#858585);font-size:11px;line-height:1.5}
+.hui-explorer{display:flex;min-width:0;min-height:0;flex-direction:column;border-right:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-base,#f8f8f8)}.hui-explorer>header{display:flex;align-items:center;justify-content:space-between;height:42px;padding:0 10px 0 16px}.hui-explorer>header strong{font-size:11px;font-weight:400;letter-spacing:.6px;text-transform:uppercase}.hui-section-title{display:flex;align-items:center;height:23px;padding:0 8px 0 4px;background:var(--dsw-alias-interactive-bg-hover,#e8e8e8);font-size:11px;user-select:none;cursor:pointer}.hui-section-title>svg{flex:none}.hui-section-title>b{overflow:hidden;flex:1;text-overflow:ellipsis;white-space:nowrap}.hui-section-title>em{display:grid;min-width:17px;height:17px;padding:0 4px;place-items:center;border-radius:9px;background:var(--dsw-alias-label-tertiary,#858585);color:var(--dsw-alias-bg-base,#fff);font-size:9px;font-style:normal}.hui-section-title>button{display:grid;width:18px;height:18px;flex:none;place-items:center;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#858585);cursor:pointer}.hui-section-title>button:hover{background:var(--dsw-alias-interactive-bg-hover,#e8e8e8);color:var(--dsw-alias-label-primary,#172033)}.hui-tree{min-height:0;overflow:auto;padding:3px 0 10px}.hui-terminal{display:flex;min-width:0;min-height:0;flex:1;flex-direction:column;background:var(--dsw-alias-bg-base,#f8f8f8);color:var(--dsw-alias-label-primary,#172033);font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:12px;line-height:1.6}.hui-term-toolbar{display:flex;align-items:center;justify-content:space-between;height:31px;padding:0 8px;border-bottom:1px solid var(--dsw-alias-border-l2,#e4e8f0);background:var(--dsw-alias-bg-module-platform,#fafbfc);color:var(--dsw-alias-label-secondary,#6c768a);font-size:11px;user-select:none}.hui-term-toolbar>span{display:flex;align-items:center;gap:5px}.hui-term-actions{display:flex;align-items:center;gap:2px}.hui-term-toolbar button{display:grid;width:20px;height:20px;place-items:center;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer}.hui-term-toolbar button:hover{background:var(--dsw-alias-interactive-bg-hover,#eef0f4);color:var(--dsw-alias-label-primary,#172033)}.hui-term-screen{position:relative;min-width:0;min-height:0;flex:1;overflow:hidden;padding:4px 0 4px 6px}.hui-term-screen .xterm{height:100%}.hui-term-screen .xterm-viewport{overflow-y:auto}.hui-term-screen .xterm-rows{color:inherit}.hui-tree-row{display:flex;width:100%;height:23px;align-items:center;gap:4px;padding:0 8px;overflow:hidden;border:0;background:transparent;color:inherit;text-align:left;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:default}.hui-tree-row:hover{background:var(--dsw-alias-interactive-bg-hover,#e8e8e8)}.hui-tree-row[data-selected]{background:#007acc26;outline:1px solid #007acc55;outline-offset:-1px}.hui-tree-row>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hui-tree-row>svg{flex:none;color:var(--dsw-alias-label-secondary,#6c768a)}.hui-tree-row>.hui-folder-icon{color:var(--dsw-alias-label-warning,#dcb67a)}.hui-commit{height:auto;min-height:44px;align-items:stretch;flex-direction:column;justify-content:center;gap:3px;padding:5px 8px}.hui-commit-meta{display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px}.hui-commit-meta>b{flex:none;color:var(--dsw-alias-brand-primary,#4d6bfe);font:600 10px/1 "SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:.4px}.hui-commit-meta>small{flex:none;color:var(--dsw-alias-label-tertiary,#8a93a5);font-size:10px}.hui-commit>span:last-child{color:var(--dsw-alias-label-primary,#172033);font-size:11px;line-height:1.5}.hui-chevron{display:flex;width:14px;flex:none;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary,#666)}.hui-folder{width:14px;flex:none;color:#dcb67a;font-size:11px}.hui-file{width:14px;flex:none;color:#6a9fb5;font-size:13px}.hui-change{padding-left:12px;cursor:pointer}.hui-change>span:first-child{overflow:hidden;min-width:0;text-overflow:ellipsis;white-space:nowrap}.hui-change>small{overflow:hidden;flex:1;color:var(--dsw-alias-label-tertiary,#858585);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.hui-change>b{margin-left:auto;color:#d19a66;font-size:10px}.hui-change>b[data-status^=M]{color:#d7ba7d}.hui-change>b[data-status^=A],.hui-change>b[data-status^=?]{color:#73c991}.hui-change>b[data-status^=D]{color:#f48771}.hui-tree>p,.hui-empty-small{padding:12px 16px;color:var(--dsw-alias-label-tertiary,#858585);font-size:11px;line-height:1.5}
 .hui-editor{display:flex;min-width:0;min-height:0;flex-direction:column;background:var(--dsw-alias-bg-module-platform,#fff)}.hui-editor-tabs{height:35px;flex:none;border-bottom:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-base,#f3f3f3)}.hui-editor-tab{display:flex;width:min(190px,80%);height:35px;align-items:center;gap:5px;padding:0 10px;border-top:1px solid #007acc;border-right:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-module-platform,#fff);font-size:11px}.hui-editor-tab>span:nth-child(2){overflow:hidden;flex:1;text-overflow:ellipsis;white-space:nowrap}.hui-editor-tab>i{color:var(--dsw-alias-label-tertiary,#858585);font-size:13px;font-style:normal}.hui-breadcrumbs{display:flex;height:26px;align-items:center;gap:3px;padding:0 10px;overflow:hidden;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);color:var(--dsw-alias-label-secondary,#666);font-size:10px;white-space:nowrap}.hui-breadcrumbs span{display:flex;align-items:center;gap:3px}.hui-breadcrumbs svg{flex:none;color:var(--dsw-alias-label-tertiary,#999)}.hui-preview{flex:1;padding:16px 18px;background:var(--dsw-alias-bg-module-platform,#fff);color:var(--dsw-alias-label-primary,#1e1e1e);font:12px/1.65 "SFMono-Regular",Consolas,"Liberation Mono",monospace;tab-size:2}.hui-statusbar{display:flex;height:22px;flex:none;align-items:center;justify-content:space-between;padding:0 9px;background:#007acc;color:#fff;font-size:10px}.hui-error{position:absolute;z-index:2;top:35px;right:0;left:46px;margin:0;padding:7px 10px;background:#b42318;color:#fff;font-size:11px}
 .hui-change>b[data-status="??"]{color:#73c991}@media(min-width:1100px){div:has(>[data-shell-overlay]):has(.hui-drawer){box-sizing:border-box;padding-right:var(--hui-drawer-width,clamp(600px,46vw,780px))}}@media(max-width:1099px){.hui-drawer{width:min(100vw,780px)}}@media(max-width:650px){.hui-workbench{grid-template-columns:42px minmax(0,1fr)}.hui-workbench[data-preview]{grid-template-columns:42px 210px minmax(280px,1fr)}.hui-drawer{overflow:auto}.hui-workbench{min-width:620px}}
 `
@@ -376,5 +521,7 @@ export function apply(ctx: ClientContext): void {
     return () => style.remove()
   }, 'dsh-workspace: styles')
   const Summary = ({ wide }: { wide: boolean }) => <HarnessSummary wide={wide} sessions={ctx.sessions} />
+  const Update = ({ wide }: { wide: boolean }) => <HarnessUpdate wide={wide} />
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-workspace', order: 10 }, Summary))
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-workspace-update', order: 11 }, Update))
 }
