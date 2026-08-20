@@ -11,7 +11,13 @@
 
 > A drop-in UI enhancement for DeepSeek Harness (DSH): keep an eye on your balance and today's cost, browse and edit-worthy project files, review Git changes & history, open a terminal, and update Harness in one click — all from the sidebar, no extra config.
 
-[Features](#features) · [Install](#install) · [Configuration](#configuration) · [FAQ](#faq) · [Known limitations](#known-limitations) · [License](#license)
+[Features](#features) · [Screenshots](#screenshots) · [Install](#install) · [Configuration](#configuration) · [FAQ](#faq) · [Known limitations](#known-limitations) · [License](#license)
+
+## Screenshots
+
+![Sidebar status card](assets/Screenshot-1.png)
+
+![Project file tree and preview](assets/Screenshot-2.png)
 
 ## Features
 
