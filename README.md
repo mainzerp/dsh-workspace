@@ -1,5 +1,7 @@
 # dsh-workspace
 
+> **Unofficial** — an independent community project, not affiliated with or endorsed by DeepSeek.
+
 [![Release](https://img.shields.io/github/v/release/deepseek-dsh/dsh-workspace?style=flat-square)](https://github.com/deepseek-dsh/dsh-workspace/releases)
 [![Stars](https://img.shields.io/github/stars/deepseek-dsh/dsh-workspace?style=flat-square)](https://github.com/deepseek-dsh/dsh-workspace)
 [![Forks](https://img.shields.io/github/forks/deepseek-dsh/dsh-workspace?style=flat-square)](https://github.com/deepseek-dsh/dsh-workspace)
