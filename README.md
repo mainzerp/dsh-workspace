@@ -33,6 +33,11 @@
 - Skips `.git`, `node_modules`, `dist`, `lib`, `coverage`, `.next`, `.cache`
 - Built-in terminal for quick command execution in the project
 
+**Internationalized**
+
+- UI strings live in a dictionary module with English as the default; German is selected automatically when the browser locale starts with `de`
+- Server-side API error messages stay in English by convention (the `reason` codes are the machine-readable part)
+
 **Privacy by default**
 
 - All endpoints are loopback-only unless you opt in with `allowRemote: true`
@@ -42,7 +47,7 @@
 
 This fork diverges from [deepseek-dsh/dsh-workspace](https://github.com/deepseek-dsh/dsh-workspace) in the following ways:
 
-- **Fully English UI** — all hardcoded Chinese strings were translated in source (upstream has no i18n system)
+- **Real i18n** — upstream hardcodes Chinese strings; this fork ships a small string-table module (`src/client/i18n.ts`) with English as default and German included. Adding a language means copying the `en` dictionary — TypeScript enforces completeness
 - **No Harness self-update** — the update button, update endpoints, and restart logic were removed. In containerized setups (e.g. Docker), updates belong to the image, not the running process
 - **USD instead of CNY** — the balance prefers the USD entry of your account
 - **Subtler status card** — the balance is displayed in a smaller, neutral style instead of a large colored figure

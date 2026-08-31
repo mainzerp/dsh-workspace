@@ -22,6 +22,7 @@ import typescriptLang from 'highlight.js/lib/languages/typescript'
 import xmlLang from 'highlight.js/lib/languages/xml'
 import yamlLang from 'highlight.js/lib/languages/yaml'
 import type { GitCommitPreview, GitDiffPreview, GitLogEntry, GitLogPreview, ProjectFilePreview, ProjectSnapshot, UsageSnapshot } from '../types.js'
+import { t } from './i18n.js'
 
 const HIGHLIGHT_LANGUAGES: ReadonlyArray<readonly [string, LanguageFn]> = [
   ['bash', bashLang], ['c', cLang], ['cpp', cppLang], ['css', cssLang], ['go', goLang],
@@ -135,10 +136,10 @@ function formattedJson(content: string): string {
 
 function commitTime(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() / 1000 - timestamp)
-  if (elapsed < 60) return 'just now'
-  if (elapsed < 3_600) return `${Math.floor(elapsed / 60)}m ago`
-  if (elapsed < 86_400) return `${Math.floor(elapsed / 3_600)}h ago`
-  if (elapsed < 7 * 86_400) return `${Math.floor(elapsed / 86_400)}d ago`
+  if (elapsed < 60) return t.justNow
+  if (elapsed < 3_600) return t.minutesAgo(Math.floor(elapsed / 60))
+  if (elapsed < 86_400) return t.hoursAgo(Math.floor(elapsed / 3_600))
+  if (elapsed < 7 * 86_400) return t.daysAgo(Math.floor(elapsed / 86_400))
   const date = new Date(timestamp * 1000)
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
 }
@@ -220,13 +221,13 @@ function TerminalPanel({ sessionId, cwd }: { sessionId: string | undefined; cwd:
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json() as { id?: string }
       if (disposed) { if (data.id !== undefined) void request('close', { id: data.id }); return }
-      if (data.id === undefined) throw new Error('No terminal session id returned')
+      if (data.id === undefined) throw new Error(t.noTerminalSessionId)
       ptyIdRef.current = data.id
       sinceRef.current = 0
       term.focus()
       setReady(true)
     }).catch(reason => {
-      if (!disposed) term.write(`\x1b[31mFailed to open terminal: ${reason instanceof Error ? reason.message : String(reason)}\x1b[0m`)
+      if (!disposed) term.write(`\x1b[31m${t.terminalOpenFailed(reason instanceof Error ? reason.message : String(reason))}\x1b[0m`)
     })
     const onData = term.onData(data => {
       const id = ptyIdRef.current
@@ -268,7 +269,7 @@ function TerminalPanel({ sessionId, cwd }: { sessionId: string | undefined; cwd:
   }, [cwd, sessionId])
   const clear = useCallback(() => { termRef.current?.clear() }, [])
   return <div className="hui-terminal">
-    <div className="hui-term-toolbar"><span><Terminal size={13} /> Terminal</span><span className="hui-term-actions">{ready ? <button type="button" title="Clear output" aria-label="Clear output" onClick={clear}><Eraser size={13} /></button> : null}</span></div>
+    <div className="hui-term-toolbar"><span><Terminal size={13} /> {t.terminal}</span><span className="hui-term-actions">{ready ? <button type="button" title={t.clearOutput} aria-label={t.clearOutput} onClick={clear}><Eraser size={13} /></button> : null}</span></div>
     <div className="hui-term-screen" ref={containerRef} />
   </div>
 }
@@ -334,7 +335,7 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     setGitLog(null)
   }, [sessionId])
   const open = useCallback((path: string, kind: 'file' | 'diff') => {
-    setSelected(path); setPreview('Loading…'); setPreviewSource(kind); setPreviewBinary(false); setPreviewDataUrl(undefined)
+    setSelected(path); setPreview(t.loading); setPreviewSource(kind); setPreviewBinary(false); setPreviewDataUrl(undefined)
     const endpoint = kind === 'file' ? '/api/v1/dsh-workspace/file' : '/api/v1/dsh-workspace/diff'
     const params = new URLSearchParams({ path })
     if (sessionId !== undefined) params.set('sessionId', sessionId)
@@ -346,9 +347,9 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
       if ('content' in data) {
         setPreviewBinary(data.binary)
         setPreviewDataUrl(data.dataUrl)
-        setPreview(data.content + (data.truncated ? '\n\n…preview truncated' : ''))
-      } else setPreview((data.diff || 'No textual diff to display for this change') + (data.truncated ? '\n\n…preview truncated' : ''))
-    }).catch(reason => setPreview(`Failed to read: ${reason instanceof Error ? reason.message : String(reason)}`))
+        setPreview(data.content + (data.truncated ? t.previewTruncated : ''))
+      } else setPreview((data.diff || t.noTextualDiffForChange) + (data.truncated ? t.previewTruncated : ''))
+    }).catch(reason => setPreview(t.readFailed(reason instanceof Error ? reason.message : String(reason))))
   }, [cwd, sessionId])
   const toggleDirectory = useCallback((path: string) => {
     setExpanded(current => {
@@ -369,14 +370,14 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     }).catch(reason => { setGitLog([]); setError(reason instanceof Error ? reason.message : String(reason)) })
   }, [cwd, sessionId])
   const openCommit = useCallback((hash: string) => {
-    setSelected(hash); setPreview('Loading…'); setPreviewSource('commit'); setPreviewBinary(false); setPreviewDataUrl(undefined)
+    setSelected(hash); setPreview(t.loading); setPreviewSource('commit'); setPreviewBinary(false); setPreviewDataUrl(undefined)
     const params = new URLSearchParams({ hash })
     if (sessionId !== undefined) params.set('sessionId', sessionId)
     if (cwd !== undefined) params.set('cwd', cwd)
     void fetch(`/api/v1/dsh-workspace/commit?${params.toString()}`).then(async response => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       return await response.json() as GitCommitPreview
-    }).then(data => setPreview((data.diff || 'No textual diff to display for this commit') + (data.truncated ? '\n\n…preview truncated' : ''))).catch(reason => setPreview(`Failed to read: ${reason instanceof Error ? reason.message : String(reason)}`))
+    }).then(data => setPreview((data.diff || t.noTextualDiffForCommit) + (data.truncated ? t.previewTruncated : ''))).catch(reason => setPreview(t.readFailed(reason instanceof Error ? reason.message : String(reason))))
   }, [cwd, sessionId])
   useEffect(() => {
     if (mode === 'changes' && historyOpen && snapshot?.gitAvailable !== false) loadHistory()
@@ -401,39 +402,39 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     const next = draft.length === 0 ? token : `${draft.replace(/\s+$/, '')} ${token}`
     bridge.write(next)
   }, [sessionId])
-  return <aside className="hui-drawer" aria-label="Project preview" style={effectiveWidth === null ? undefined : { width: effectiveWidth }}>
+  return <aside className="hui-drawer" aria-label={t.projectPreview} style={effectiveWidth === null ? undefined : { width: effectiveWidth }}>
     <div className="hui-resizer" aria-hidden="true" onPointerDown={startResize} />
-    <header className="hui-titlebar"><div><span className="hui-vscode-mark"><Blocks size={14} /></span><span title={snapshot?.rootPath}>{snapshot?.rootPath ?? 'Loading current project…'}</span></div></header>
-    {error ? <div className="hui-error">{error}<button type="button" onClick={() => setError(null)} aria-label="Dismiss error" title="Dismiss"><X size={12} /></button></div> : null}
+    <header className="hui-titlebar"><div><span className="hui-vscode-mark"><Blocks size={14} /></span><span title={snapshot?.rootPath}>{snapshot?.rootPath ?? t.loadingCurrentProject}</span></div></header>
+    {error ? <div className="hui-error">{error}<button type="button" onClick={() => setError(null)} aria-label={t.dismiss} title={t.dismiss}><X size={12} /></button></div> : null}
     <div className="hui-workbench" data-preview={(selected !== null && mode !== 'terminal') || undefined}>
-      <nav className="hui-activity" aria-label="Project views"><button type="button" aria-label="Explorer" title="Explorer" data-active={mode === 'files' || undefined} onClick={() => setMode('files')}><FolderTree size={20} /></button><button type="button" aria-label="Source Control" title="Source Control" data-active={mode === 'changes' || undefined} onClick={() => setMode('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button></nav>
+      <nav className="hui-activity" aria-label={t.projectViews}><button type="button" aria-label={t.explorer} title={t.explorer} data-active={mode === 'files' || undefined} onClick={() => setMode('files')}><FolderTree size={20} /></button><button type="button" aria-label={t.sourceControl} title={t.sourceControl} data-active={mode === 'changes' || undefined} onClick={() => setMode('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button></nav>
       <section className="hui-explorer">
-        <header><strong>{mode === 'files' ? 'Explorer' : mode === 'changes' ? 'Source Control' : 'Terminal'}</strong>{mode !== 'terminal' ? <button type="button" onClick={refresh} aria-label="Refresh"><RefreshCw size={15} /></button> : null}</header>
+        <header><strong>{mode === 'files' ? t.explorer : mode === 'changes' ? t.sourceControl : t.terminal}</strong>{mode !== 'terminal' ? <button type="button" onClick={refresh} aria-label={t.refresh}><RefreshCw size={15} /></button> : null}</header>
         {mode === 'terminal' ? <TerminalPanel sessionId={sessionId} cwd={cwd} /> : mode === 'files' ? <>
         <div className="hui-section-title"><ChevronDown size={14} /><b>{snapshot?.rootName?.toUpperCase() ?? 'PROJECT'}</b></div>
         <div className="hui-tree" role="tree">
           {visibleEntries.map(entry => entry.kind === 'directory'
             ? <button type="button" role="treeitem" aria-expanded={expanded.has(entry.path)} key={entry.path} className="hui-tree-row" style={{ paddingLeft: 7 + Math.min(entry.depth, 12) * 13 }} title={entry.path} onClick={() => toggleDirectory(entry.path)}><span className="hui-chevron">{expanded.has(entry.path) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>{expanded.has(entry.path) ? <FolderOpen className="hui-folder-icon" size={13} /> : <Folder className="hui-folder-icon" size={13} />}<span>{entry.name}</span></button>
-            : <div role="treeitem" key={entry.path} className="hui-tree-row" data-selected={selected === entry.path || undefined} style={{ paddingLeft: 20 + Math.min(entry.depth, 12) * 13 }} title={entry.path}><button type="button" className="hui-tree-open" onClick={() => open(entry.path, 'file')}><FileTypeIcon path={entry.path} /><span>{entry.name}</span><span role="button" tabIndex={0} className="hui-tree-at" title="Reference this file in the input" aria-label={`Reference ${entry.name} in the input`} onClick={event => { event.stopPropagation(); attachFile(entry.path) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); attachFile(entry.path) } }}><AtSign size={13} /></span></button></div>)}
-          {snapshot?.truncated ? <p>Too many files — the list is truncated</p> : null}
+            : <div role="treeitem" key={entry.path} className="hui-tree-row" data-selected={selected === entry.path || undefined} style={{ paddingLeft: 20 + Math.min(entry.depth, 12) * 13 }} title={entry.path}><button type="button" className="hui-tree-open" onClick={() => open(entry.path, 'file')}><FileTypeIcon path={entry.path} /><span>{entry.name}</span><span role="button" tabIndex={0} className="hui-tree-at" title={t.referenceThisFile} aria-label={t.referenceFile(entry.name)} onClick={event => { event.stopPropagation(); attachFile(entry.path) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); attachFile(entry.path) } }}><AtSign size={13} /></span></button></div>)}
+          {snapshot?.truncated ? <p>{t.listTruncated}</p> : null}
         </div>
         </> : <>
-        <div className="hui-section-title" role="button" title={changesOpen ? 'Collapse changes' : 'Expand changes'} onClick={() => setChangesOpen(current => !current)}>{changesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<b>CHANGES</b><em>{snapshot?.changes.length ?? 0}</em></div>
+        <div className="hui-section-title" role="button" title={changesOpen ? t.collapseChanges : t.expandChanges} onClick={() => setChangesOpen(current => !current)}>{changesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<b>CHANGES</b><em>{snapshot?.changes.length ?? 0}</em></div>
         {changesOpen ? <div className="hui-tree">
-          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">The current directory is not a Git repository</div> : snapshot?.gitAvailable && snapshot.changes.length === 0 ? <div className="hui-empty-small">No pending changes</div> : snapshot?.changes.map(change => <button type="button" key={`${change.status}:${change.path}`} className="hui-tree-row hui-change" data-selected={selected === change.path || undefined} title={change.path} onClick={() => open(change.path, 'diff')}><span>{change.path.split('/').at(-1)}</span><small>{change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : ''}</small><b data-status={change.status}>{change.status}</b></button>)}
+          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">{t.notGitRepository}</div> : snapshot?.gitAvailable && snapshot.changes.length === 0 ? <div className="hui-empty-small">{t.noPendingChanges}</div> : snapshot?.changes.map(change => <button type="button" key={`${change.status}:${change.path}`} className="hui-tree-row hui-change" data-selected={selected === change.path || undefined} title={change.path} onClick={() => open(change.path, 'diff')}><span>{change.path.split('/').at(-1)}</span><small>{change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : ''}</small><b data-status={change.status}>{change.status}</b></button>)}
         </div> : null}
-        <div className="hui-section-title" role="button" title={historyOpen ? 'Collapse history' : 'Expand history'} onClick={() => setHistoryOpen(current => !current)}>{historyOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<b>HISTORY</b><em>{gitLog?.length ?? 0}</em></div>
+        <div className="hui-section-title" role="button" title={historyOpen ? t.collapseHistory : t.expandHistory} onClick={() => setHistoryOpen(current => !current)}>{historyOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<b>HISTORY</b><em>{gitLog?.length ?? 0}</em></div>
         {historyOpen ? <div className="hui-tree">
-          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">The current directory is not a Git repository</div> : gitLog === null ? <div className="hui-empty-small">Loading history…</div> : gitLog.length === 0 ? <div className="hui-empty-small">No commits yet</div> : gitLog.map(entry => <button type="button" key={entry.hash} className="hui-tree-row hui-commit" data-selected={selected === entry.hash || undefined} title={`${entry.subject}\n${entry.author}\n${new Date(entry.timestamp * 1000).toLocaleString()}`} onClick={() => openCommit(entry.hash)}><span className="hui-commit-meta"><b>{entry.shortHash}</b><small>{commitTime(entry.timestamp)}</small></span><span>{entry.subject}</span></button>)}
+          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">{t.notGitRepository}</div> : gitLog === null ? <div className="hui-empty-small">{t.loadingHistory}</div> : gitLog.length === 0 ? <div className="hui-empty-small">{t.noCommits}</div> : gitLog.map(entry => <button type="button" key={entry.hash} className="hui-tree-row hui-commit" data-selected={selected === entry.hash || undefined} title={`${entry.subject}\n${entry.author}\n${new Date(entry.timestamp * 1000).toLocaleString()}`} onClick={() => openCommit(entry.hash)}><span className="hui-commit-meta"><b>{entry.shortHash}</b><small>{commitTime(entry.timestamp)}</small></span><span>{entry.subject}</span></button>)}
         </div> : null}
         </>}
       </section>
       {selected !== null && mode !== 'terminal' ? <section className="hui-editor">
-        <div className="hui-editor-tabs"><div className="hui-editor-tab"><span>{selectedName}</span><button type="button" onClick={closeFile} aria-label={`Close ${selectedName}`} title="Close file"><X size={14} /></button></div></div>
-        <div className="hui-breadcrumbs"><div>{selected.split('/').map((part, index) => <span key={`${part}:${index}`}>{index > 0 ? <ChevronRight size={10} /> : null}{part}</span>)}</div><b>{presentation.toUpperCase()}</b></div><div className="hui-editor-surface" data-presentation={presentation}>{presentation === 'image' && previewDataUrl !== undefined ? <div className="hui-image-view"><img src={previewDataUrl} alt={selectedName ?? 'Image preview'} /><span>{selectedName}</span></div> : presentation === 'markdown' ? <MarkdownPreview content={preview} /> : presentation === 'json' ? <CodePreview content={formattedJson(preview)} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'diff' ? <CodePreview content={preview} diff /> : presentation === 'code' ? <CodePreview content={preview} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'binary' ? <div className="hui-binary-view"><strong>This binary file cannot be previewed</strong><span>{selectedName}</span></div> : <div className="hui-text-view">{preview}</div>}</div>
+        <div className="hui-editor-tabs"><div className="hui-editor-tab"><span>{selectedName}</span><button type="button" onClick={closeFile} aria-label={t.closeFileName(selectedName ?? '')} title={t.closeFile}><X size={14} /></button></div></div>
+        <div className="hui-breadcrumbs"><div>{selected.split('/').map((part, index) => <span key={`${part}:${index}`}>{index > 0 ? <ChevronRight size={10} /> : null}{part}</span>)}</div><b>{presentation.toUpperCase()}</b></div><div className="hui-editor-surface" data-presentation={presentation}>{presentation === 'image' && previewDataUrl !== undefined ? <div className="hui-image-view"><img src={previewDataUrl} alt={selectedName ?? t.imagePreview} /><span>{selectedName}</span></div> : presentation === 'markdown' ? <MarkdownPreview content={preview} /> : presentation === 'json' ? <CodePreview content={formattedJson(preview)} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'diff' ? <CodePreview content={preview} diff /> : presentation === 'code' ? <CodePreview content={preview} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'binary' ? <div className="hui-binary-view"><strong>{t.binaryNoPreview}</strong><span>{selectedName}</span></div> : <div className="hui-text-view">{preview}</div>}</div>
       </section> : null}
     </div>
-    <footer className="hui-statusbar"><span><GitBranch size={12} /> {snapshot?.gitAvailable ? `${snapshot.changes.length} changes` : 'Not a Git project'}</span><span>{snapshot?.rootName ?? 'Project'}</span></footer>
+    <footer className="hui-statusbar"><span><GitBranch size={12} /> {snapshot?.gitAvailable ? t.changesCount(snapshot.changes.length) : t.notGitProject}</span><span>{snapshot?.rootName ?? t.project}</span></footer>
   </aside>
 }
 
@@ -461,13 +462,13 @@ function HarnessSummary({ wide, sessions }: { wide: boolean; sessions: SessionsS
     return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
   const balance = snapshot?.balance.balances.find(item => item.currency === 'USD') ?? snapshot?.balance.balances[0]
-  const balanceValue = balance ? formatMoney(Number(balance.totalBalance), balance.currency) : snapshot?.balance.error ? 'N/A' : '\u2014'
+  const balanceValue = balance ? formatMoney(Number(balance.totalBalance), balance.currency) : snapshot?.balance.error ? t.notAvailable : '\u2014'
   const balanceAmount = balance ? Number(balance.totalBalance) : Number.NaN
   const lowThreshold = balance?.currency === 'CNY' ? 15 : 2
   const balanceTone = Number.isFinite(balanceAmount) && balanceAmount <= lowThreshold ? 'danger' : 'safe'
   const period = snapshot?.ratePeriod ?? 'idle'
   return <div className={`hui-summary${wide ? '' : ' rail'}`}>
-    <div className="hui-summary-main" aria-label="Balance status" title={snapshot?.balance.error}>{wide ? <span className="hui-content"><span className="hui-card-head"><span className="hui-period" data-period={period} title={period === 'idle' ? 'Off-peak billing period' : 'Peak billing period'}><i />{period === 'idle' ? 'Off-peak' : 'Peak'}</span></span><span className="hui-balance-line"><b data-tone={balanceTone}>{balanceValue}</b><small>Balance</small></span></span> : <span className="hui-period" data-period={period} title={period === 'idle' ? 'Off-peak billing period' : 'Peak billing period'}><i /></span>}</div>
+    <div className="hui-summary-main" aria-label={t.balanceStatus} title={snapshot?.balance.error}>{wide ? <span className="hui-content"><span className="hui-card-head"><span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i />{period === 'idle' ? t.offPeak : t.peak}</span></span><span className="hui-balance-line"><b data-tone={balanceTone}>{balanceValue}</b><small>{t.balance}</small></span></span> : <span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i /></span>}</div>
     <ProjectDrawer sessionId={sessionId} cwd={cwd} />
   </div>
 }
