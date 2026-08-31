@@ -7,7 +7,7 @@
 [![Stars](https://img.shields.io/github/stars/mainzerp/dsh-workspace?style=flat-square)](https://github.com/mainzerp/dsh-workspace)
 [![License](https://img.shields.io/github/license/mainzerp/dsh-workspace?style=flat-square)](https://github.com/mainzerp/dsh-workspace)
 
-> A drop-in UI enhancement for DeepSeek Harness (DSH): a subtle USD balance and today's cost in the sidebar, a project file tree with previews, Git changes & history, and a built-in terminal — no extra config.
+> A drop-in UI enhancement for DeepSeek Harness (DSH): a subtle USD balance with peak/off-peak indicator in the sidebar, a project file tree with previews, Git changes & history, and a built-in terminal — no extra config.
 
 [Features](#features) · [Screenshots](#screenshots) · [Differences from upstream](#differences-from-upstream) · [Install](#install) · [Configuration](#configuration) · [FAQ](#faq) · [Known limitations](#known-limitations) · [License](#license)
 
@@ -21,10 +21,10 @@
 
 **Usage at a glance**
 
-- Subtle live balance (USD, formatted via `Intl.NumberFormat`) and today's cost in the bottom-left of Harness
+- Subtle live balance (USD, formatted via `Intl.NumberFormat`) in the bottom-left of Harness
 - The balance stays neutral and only turns red when it runs low (≤ $2, or ≤ ¥15 for CNY accounts)
+- Peak/off-peak indicator following DeepSeek's billing schedule (peak 9:00–12:00 and 14:00–18:00 Beijing time)
 - Auto-refreshes every 30s and re-fetches the moment you switch back to the tab
-- Today's cost uses the **official DeepSeek bill first**, falling back to a local USD token estimate when the platform API is unavailable
 
 **Project workspace panel**
 
@@ -44,9 +44,9 @@ This fork diverges from [deepseek-dsh/dsh-workspace](https://github.com/deepseek
 
 - **Fully English UI** — all hardcoded Chinese strings were translated in source (upstream has no i18n system)
 - **No Harness self-update** — the update button, update endpoints, and restart logic were removed. In containerized setups (e.g. Docker), updates belong to the image, not the running process
-- **No idle/peak tariff logic** — the Beijing peak-window schedule, the peak indicator, and period-based pricing were removed; the local estimate uses a single standard USD rate
-- **USD instead of CNY** — the balance prefers the USD entry of your account, and the local cost estimate is priced in USD
+- **USD instead of CNY** — the balance prefers the USD entry of your account
 - **Subtler status card** — the balance is displayed in a smaller, neutral style instead of a large colored figure
+- **No cost estimation** — the today's-cost figure (platform bill + local token estimate) was removed; the card shows balance and billing period only
 
 ## Install
 
@@ -79,6 +79,7 @@ The plugin works with zero configuration. The following options can be set in th
 | `baseUrl` | `https://api.deepseek.com` | DeepSeek API base URL |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | Env name of the API key resolved via `ctx.credentials` |
 | `timezoneOffsetMinutes` | `0` | Minutes east of UTC used for the "today" boundary |
+| `peakWindows` | `[[540, 720], [840, 1080]]` | Peak billing windows in minutes (Beijing time) |
 | `projectRoot` | — | Absolute project root to preview; defaults to the session working directory |
 | `allowRemote` | `false` | Allow non-loopback access to the plugin endpoints |
 
@@ -98,10 +99,6 @@ The plugin works with zero configuration. The following options can be set in th
 
 A: Make sure it is installed into the `web` profile (command uses `--profile web`) and confirm the plugin layer is mounted with `dsh web --dump-config | grep dsh-workspace`. Refreshing the page is not enough; restart the `dsh web` process.
 
-**Today's cost does not match the official bill?**
-
-A: The cost is taken from the official platform bill first, so it shows real spending; when the platform API fails authentication it falls back to a local USD token estimate, which is approximate and not a bill. The source is labeled in the tooltip next to the amount.
-
 **Why is the balance red?**
 
 A: The balance turns red when it drops to $2 or below (¥15 for CNY accounts) as a low-balance reminder; it is display only and does not affect API calls.
@@ -112,7 +109,7 @@ A: Project data is loopback-only by default; other browsers get a 403. If you re
 
 ## Known limitations
 
-- Today's cost prefers the official bill and falls back to a local USD estimate; the estimate is not an account bill
+- The peak/off-peak indicator is display-only; it mirrors DeepSeek's billing schedule and does not affect API calls
 - The project API is read-only and loopback-only by default; no write operations
 - Depends on the `node-pty` native module; see Troubleshooting if platform builds fail
 

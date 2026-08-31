@@ -9,24 +9,22 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { aggregateToday, todayStart } from './aggregate.js'
+import { aggregateToday } from './aggregate.js'
 import { fetchBalance } from './balance.js'
-import { estimateCost } from './pricing.js'
-import { fetchUsageCost } from './usage-cost.js'
 import { ProjectBrowser } from './project-browser.js'
+import { trafficPeriodAt } from './schedule.js'
 
 export type * from './types.js'
-export { estimateCost } from './pricing.js'
 
 /** Plugin configuration. */
 export interface Config {
   baseUrl?: string
   apiKey?: string
   apiKeyEnv?: string
-  usageCostUrl?: string
   timezoneOffsetMinutes?: number
   balanceTimeoutMs?: number
   inspectConcurrency?: number
+  peakWindows?: number[][]
   projectRoot?: string
   projectMaxEntries?: number
   projectMaxFileBytes?: number
@@ -39,10 +37,10 @@ export const Config: z<Config> = z.object({
   baseUrl: z.string().default('https://api.deepseek.com'),
   apiKey: z.string(),
   apiKeyEnv: z.string().default('DEEPSEEK_API_KEY'),
-  usageCostUrl: z.string().default('https://platform.deepseek.com/api/v0/usage/by_api_key/cost'),
   timezoneOffsetMinutes: z.number().step(1).min(-720).max(840).default(0),
   balanceTimeoutMs: z.number().step(1).min(1).max(60_000).default(5_000),
   inspectConcurrency: z.number().step(1).min(1).max(64).default(8),
+  peakWindows: z.array(z.array(z.number().step(1).min(0).max(1_440))).default([[540, 720], [840, 1_080]]),
   projectRoot: z.string(),
   projectMaxEntries: z.number().step(1).min(100).max(20_000).default(2_000),
   projectMaxFileBytes: z.number().step(1).min(1_024).max(2_000_000).default(200_000),
@@ -119,17 +117,24 @@ export function apply(ctx: Context, config: Config = {}): void {
   const webServer = ctx.get('webServer') as WebServer | undefined
   if (webServer === undefined) throw new Error('dsh-workspace: webServer service is unavailable')
   const baseUrl = config.baseUrl ?? 'https://api.deepseek.com'
-  const usageCostUrl = config.usageCostUrl ?? 'https://platform.deepseek.com/api/v0/usage/by_api_key/cost'
   const apiKeyRef = credentialRef(config.apiKeyEnv ?? 'DEEPSEEK_API_KEY')
   const timezoneOffsetMinutes = config.timezoneOffsetMinutes ?? 0
   const balanceTimeoutMs = config.balanceTimeoutMs ?? 5_000
   const inspectConcurrency = config.inspectConcurrency ?? 8
+  const peakWindows: [number, number][] = (config.peakWindows ?? [[540, 720], [840, 1_080]]).map(pair => [pair[0], pair[1]] as [number, number])
   const maxEntries = config.projectMaxEntries ?? 2_000
   const maxFileBytes = config.projectMaxFileBytes ?? 200_000
   try { const url = new URL(baseUrl); if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error() } catch { throw new Error('dsh-workspace: baseUrl must be an absolute HTTP(S) URL') }
   if (!Number.isInteger(timezoneOffsetMinutes) || timezoneOffsetMinutes < -720 || timezoneOffsetMinutes > 840) throw new Error('dsh-workspace: timezoneOffsetMinutes must be an integer from -720 through 840')
   if (!Number.isInteger(balanceTimeoutMs) || balanceTimeoutMs < 1 || balanceTimeoutMs > 60_000) throw new Error('dsh-workspace: balanceTimeoutMs must be an integer from 1 through 60000')
   if (!Number.isInteger(inspectConcurrency) || inspectConcurrency < 1 || inspectConcurrency > 64) throw new Error('dsh-workspace: inspectConcurrency must be an integer from 1 through 64')
+  let peakWindowJson = ''
+  try { peakWindowJson = JSON.stringify(peakWindows) } catch { peakWindowJson = '' }
+  if (!Array.isArray(peakWindows) || peakWindows.length === 0 || peakWindowJson.length === 0) throw new Error('dsh-workspace: peakWindows must be a non-empty JSON-array list')
+  for (const pair of peakWindows) {
+    const start = pair[0]; const end = pair[1]
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > 1_440 || end < 0 || end > 1_440 || start === end) throw new Error('dsh-workspace: each peakWindow must be an integer [start, end] pair from 0 through 1440 with start !== end')
+  }
   if (!Number.isInteger(maxEntries) || maxEntries < 100 || maxEntries > 20_000) throw new Error('dsh-workspace: projectMaxEntries must be an integer from 100 through 20000')
   if (!Number.isInteger(maxFileBytes) || maxFileBytes < 1_024 || maxFileBytes > 2_000_000) throw new Error('dsh-workspace: projectMaxFileBytes must be an integer from 1024 through 2000000')
   const browsers = new Map<string, Promise<ProjectBrowser>>()
@@ -226,21 +231,18 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: 'Usage data is restricted to local requests by default', fields: [], requestId }, requestId); return }
       try {
         const now = Date.now()
-        const dayStartSeconds = todayStart(now, timezoneOffsetMinutes) / 1000
         const resolvedApiKey = config.apiKey ?? (await ctx.credentials.resolve(apiKeyRef))?.value
-        const [logs, balance, platformCost] = await Promise.all([
+        const [logs, balance] = await Promise.all([
           readLogs(),
           fetchBalance(resolvedApiKey, baseUrl, AbortSignal.timeout(balanceTimeoutMs)),
-          fetchUsageCost(resolvedApiKey, usageCostUrl, dayStartSeconds, now / 1000, timezoneOffsetMinutes * 60, AbortSignal.timeout(balanceTimeoutMs)),
         ])
         const usage = aggregateToday(logs, now, timezoneOffsetMinutes)
-        const estimate = estimateCost(usage.models)
         sendJson(res, 200, {
           generatedAt: Math.floor(now / 1000),
           usage: { ...usage, startTime: Math.floor(usage.startTime / 1000), endTime: Math.floor(usage.endTime / 1000) },
           balance,
-          estimatedCost: estimate,
-          cost: { total: platformCost ?? estimate.amount, source: platformCost === null ? 'estimate' : 'platform' },
+          ratePeriod: trafficPeriodAt(now, timezoneOffsetMinutes, peakWindows),
+          trafficSchedule: { timezoneOffsetMinutes, peakWindows },
         }, requestId)
       } catch (error) {
         ctx.logger.warn(error)

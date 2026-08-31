@@ -461,13 +461,13 @@ function HarnessSummary({ wide, sessions }: { wide: boolean; sessions: SessionsS
     return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
   const balance = snapshot?.balance.balances.find(item => item.currency === 'USD') ?? snapshot?.balance.balances[0]
-  const cost = snapshot?.cost ?? (snapshot === null ? undefined : { total: snapshot.estimatedCost.amount, source: 'estimate' as const })
   const balanceValue = balance ? formatMoney(Number(balance.totalBalance), balance.currency) : snapshot?.balance.error ? 'N/A' : '\u2014'
   const balanceAmount = balance ? Number(balance.totalBalance) : Number.NaN
   const lowThreshold = balance?.currency === 'CNY' ? 15 : 2
   const balanceTone = Number.isFinite(balanceAmount) && balanceAmount <= lowThreshold ? 'danger' : 'safe'
+  const period = snapshot?.ratePeriod ?? 'idle'
   return <div className={`hui-summary${wide ? '' : ' rail'}`}>
-    <div className="hui-summary-main" aria-label="Harness status" title={snapshot?.balance.error}><span className="hui-icon"><Activity size={13} /></span>{wide ? <span className="hui-content"><span className="hui-card-head"><span className="hui-card-title">Harness</span><span className="hui-cost" title={cost?.source === 'estimate' ? 'Platform API unavailable \u2014 local estimate' : 'DeepSeek platform billing'}>Today <b>{cost ? `$${cost.total.toFixed(3)}` : '\u2014'}</b></span></span><span className="hui-balance-line"><b data-tone={balanceTone}>{balanceValue}</b><small>Balance</small></span></span> : null}</div>
+    <div className="hui-summary-main" aria-label="Harness status" title={snapshot?.balance.error}><span className="hui-icon"><Activity size={13} /></span>{wide ? <span className="hui-content"><span className="hui-card-head"><span className="hui-card-title">Harness</span><span className="hui-period" data-period={period} title={period === 'idle' ? 'Off-peak billing period' : 'Peak billing period'}><i />{period === 'idle' ? 'Off-peak' : 'Peak'}</span></span><span className="hui-balance-line"><b data-tone={balanceTone}>{balanceValue}</b><small>Balance</small></span></span> : null}</div>
     <ProjectDrawer sessionId={sessionId} cwd={cwd} />
   </div>
 }
@@ -478,7 +478,7 @@ div:has(> [data-slot='sidebar.footer.action']){flex-wrap:wrap}.hui-summary{posit
 `
 
 const STATUS_STYLES = `
-.hui-balance-line b[data-tone=safe]{color:var(--dsw-alias-label-primary,#172033)}.hui-balance-line b[data-tone=danger]{color:var(--dsw-alias-label-error,#d94a4a)}.hui-cost{display:inline-flex;min-width:0;flex:none;align-items:center;gap:3px;color:var(--dsw-alias-label-tertiary,#8a93a5);font-size:10px;white-space:nowrap}.hui-cost b{color:var(--dsw-alias-label-secondary,#6c768a);font-weight:600;font-variant-numeric:tabular-nums}
+.hui-balance-line b[data-tone=safe]{color:var(--dsw-alias-label-primary,#172033)}.hui-balance-line b[data-tone=danger]{color:var(--dsw-alias-label-error,#d94a4a)}.hui-period{display:inline-flex;flex:none;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--dsw-alias-label-tertiary,#8a93a5)}.hui-period>i{width:6px;height:6px;border-radius:50%;background:currentColor}.hui-period[data-period=idle]{color:var(--dsw-alias-label-success,#16895a)}.hui-period[data-period=peak]{color:var(--dsw-alias-label-error,#d94a4a)}.hui-period[data-period=peak]>i{box-shadow:0 0 0 0 rgb(217 74 74/.5);animation:hui-pulse 1.8s ease-out infinite}@keyframes hui-pulse{70%{box-shadow:0 0 0 6px rgb(217 74 74/0)}100%{box-shadow:0 0 0 0 rgb(217 74 74/0)}}
 `
 
 const FLAT_STYLES = `

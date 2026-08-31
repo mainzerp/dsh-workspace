@@ -86,20 +86,14 @@ export interface BalanceSnapshot {
   error?: string
 }
 
-/** Local charge estimate using the bundled public tariff. */
-export interface CostEstimate { amount: number; complete: boolean; unpricedModels: string[] }
-
-/** Today's billed amount: platform total when available, otherwise the local estimate. */
-export interface UsageCostSnapshot {
-  total: number
-  source: 'platform' | 'estimate'
-}
-
 /** Self-contained dsh-workspace summary response. */
 export interface UsageSnapshot {
   generatedAt: number
   usage: UsageSummary
   balance: BalanceSnapshot
-  estimatedCost: CostEstimate
-  cost: UsageCostSnapshot
+  ratePeriod: 'idle' | 'peak'
+  trafficSchedule: {
+    timezoneOffsetMinutes: number
+    peakWindows: readonly (readonly [number, number])[]
+  }
 }

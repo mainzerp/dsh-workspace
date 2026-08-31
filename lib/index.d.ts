@@ -1,16 +1,15 @@
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 export type * from './types.js';
-export { estimateCost } from './pricing.js';
 /** Plugin configuration. */
 export interface Config {
     baseUrl?: string;
     apiKey?: string;
     apiKeyEnv?: string;
-    usageCostUrl?: string;
     timezoneOffsetMinutes?: number;
     balanceTimeoutMs?: number;
     inspectConcurrency?: number;
+    peakWindows?: number[][];
     projectRoot?: string;
     projectMaxEntries?: number;
     projectMaxFileBytes?: number;
