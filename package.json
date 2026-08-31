@@ -1,6 +1,6 @@
 {
   "name": "@mainzerp/dsh-workspace",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "DSH web UI enhancement: project file tree, Git changes & history, terminal, and a subtle USD balance/cost summary in the sidebar",
   "type": "module",
   "main": "lib/index.js",
