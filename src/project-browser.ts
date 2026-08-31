@@ -32,10 +32,10 @@ export class ProjectBrowser {
   }
 
   async #resolveFile(input: string, allowMissing = false): Promise<{ absolute: string; path: string }> {
-    if (input.length === 0 || input.includes('\0') || isAbsolute(input)) throw new Error('文件路径无效')
+    if (input.length === 0 || input.includes('\0') || isAbsolute(input)) throw new Error('Invalid file path')
     const candidate = resolve(this.#root, input)
     const rel = relative(this.#root, candidate)
-    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('文件路径超出项目目录')
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('File path escapes the project root')
     let canonical: string
     try {
       canonical = await realpath(candidate)
@@ -45,7 +45,7 @@ export class ProjectBrowser {
     }
     const canonicalRel = relative(this.#root, canonical)
     if (canonicalRel === '..' || canonicalRel.startsWith(`..${sep}`) || isAbsolute(canonicalRel)) {
-      throw new Error('符号链接目标超出项目目录')
+      throw new Error('Symlink target escapes the project root')
     }
     return { absolute: canonical, path: rel.split(sep).join('/') }
   }
@@ -138,7 +138,7 @@ export class ProjectBrowser {
 
   /** @param hash commit id. @returns bounded text diff of one commit. */
   async show(hash: string): Promise<GitCommitPreview> {
-    if (!/^[0-9a-f]{4,40}$/i.test(hash)) throw new Error('提交标识无效')
+    if (!/^[0-9a-f]{4,40}$/i.test(hash)) throw new Error('Invalid commit hash')
     const stdout = await this.#git(['show', '--no-ext-diff', '--format=', hash])
     const encoded = Buffer.from(stdout)
     return { hash, diff: encoded.subarray(0, this.#maxFileBytes).toString('utf8'), truncated: encoded.byteLength > this.#maxFileBytes }

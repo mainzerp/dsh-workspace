@@ -95,21 +95,6 @@ export interface UsageCostSnapshot {
   source: 'platform' | 'estimate'
 }
 
-/** Harness update check response. */
-export interface UpdateCheck {
-  currentVersion: string | null
-  latestVersion: string | null
-  outdated: boolean
-  checkedAt: number
-  error: string | null
-}
-
-/** Harness update execution result. */
-export interface UpdateRunResult {
-  ok: boolean
-  message: string
-}
-
 /** Self-contained dsh-workspace summary response. */
 export interface UsageSnapshot {
   generatedAt: number
@@ -117,9 +102,4 @@ export interface UsageSnapshot {
   balance: BalanceSnapshot
   estimatedCost: CostEstimate
   cost: UsageCostSnapshot
-  ratePeriod: 'idle' | 'peak'
-  trafficSchedule: {
-    timezoneOffsetMinutes: number
-    peakWindows: readonly (readonly [number, number])[]
-  }
 }

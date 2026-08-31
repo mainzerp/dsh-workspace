@@ -13,12 +13,12 @@ function valid(value: unknown): value is ResponseBody {
 
 /** @param apiKey DeepSeek token. @param baseUrl API root. @param signal cancellation. @returns normalized balance. */
 export async function fetchBalance(apiKey: string | undefined, baseUrl: string, signal?: AbortSignal): Promise<BalanceSnapshot> {
-  if (!apiKey) return { available: null, balances: [], error: '未配置 DEEPSEEK_API_KEY' }
+  if (!apiKey) return { available: null, balances: [], error: 'DEEPSEEK_API_KEY is not configured' }
   try {
     const response = await fetch(new URL('/user/balance', baseUrl), { headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` }, ...(signal === undefined ? {} : { signal }) })
-    if (!response.ok) throw new Error(`DeepSeek 余额接口返回 HTTP ${response.status}`)
+    if (!response.ok) throw new Error(`DeepSeek balance endpoint returned HTTP ${response.status}`)
     const body: unknown = await response.json()
-    if (!valid(body)) throw new Error('DeepSeek 余额接口返回了未知数据')
+    if (!valid(body)) throw new Error('DeepSeek balance endpoint returned unexpected data')
     return { available: body.is_available, balances: body.balance_infos.map(info => ({ currency: info.currency, totalBalance: info.total_balance, grantedBalance: info.granted_balance, toppedUpBalance: info.topped_up_balance })) }
   } catch (error) {
     return { available: null, balances: [], error: error instanceof Error ? error.message : String(error) }

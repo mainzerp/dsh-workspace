@@ -11,7 +11,6 @@ export interface Config {
     timezoneOffsetMinutes?: number;
     balanceTimeoutMs?: number;
     inspectConcurrency?: number;
-    peakWindows?: number[][];
     projectRoot?: string;
     projectMaxEntries?: number;
     projectMaxFileBytes?: number;

@@ -14,8 +14,6 @@ import { fetchBalance } from './balance.js'
 import { estimateCost } from './pricing.js'
 import { fetchUsageCost } from './usage-cost.js'
 import { ProjectBrowser } from './project-browser.js'
-import { trafficPeriodAt } from './schedule.js'
-import { checkUpdate, relaunchHarness, runHarnessUpdate } from './update.js'
 
 export type * from './types.js'
 export { estimateCost } from './pricing.js'
@@ -29,7 +27,6 @@ export interface Config {
   timezoneOffsetMinutes?: number
   balanceTimeoutMs?: number
   inspectConcurrency?: number
-  peakWindows?: number[][]
   projectRoot?: string
   projectMaxEntries?: number
   projectMaxFileBytes?: number
@@ -43,10 +40,9 @@ export const Config: z<Config> = z.object({
   apiKey: z.string(),
   apiKeyEnv: z.string().default('DEEPSEEK_API_KEY'),
   usageCostUrl: z.string().default('https://platform.deepseek.com/api/v0/usage/by_api_key/cost'),
-  timezoneOffsetMinutes: z.number().step(1).min(-720).max(840).default(480),
+  timezoneOffsetMinutes: z.number().step(1).min(-720).max(840).default(0),
   balanceTimeoutMs: z.number().step(1).min(1).max(60_000).default(5_000),
   inspectConcurrency: z.number().step(1).min(1).max(64).default(8),
-  peakWindows: z.array(z.array(z.number().step(1).min(0).max(1_440))).default([[540, 720], [840, 1_080]]),
   projectRoot: z.string(),
   projectMaxEntries: z.number().step(1).min(100).max(20_000).default(2_000),
   projectMaxFileBytes: z.number().step(1).min(1_024).max(2_000_000).default(200_000),
@@ -85,7 +81,7 @@ function readJson(req: IncomingMessage): Promise<unknown> {
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > 1_000_000) {
-        reject(new Error('请求体过大'))
+        reject(new Error('Request body too large'))
         req.destroy()
         return
       }
@@ -93,7 +89,7 @@ function readJson(req: IncomingMessage): Promise<unknown> {
     })
     req.on('end', () => {
       if (body.length === 0) { resolve({}); return }
-      try { resolve(JSON.parse(body)) } catch { reject(new Error('请求体不是合法 JSON')) }
+      try { resolve(JSON.parse(body)) } catch { reject(new Error('Request body is not valid JSON')) }
     })
     req.on('error', reject)
   })
@@ -125,23 +121,15 @@ export function apply(ctx: Context, config: Config = {}): void {
   const baseUrl = config.baseUrl ?? 'https://api.deepseek.com'
   const usageCostUrl = config.usageCostUrl ?? 'https://platform.deepseek.com/api/v0/usage/by_api_key/cost'
   const apiKeyRef = credentialRef(config.apiKeyEnv ?? 'DEEPSEEK_API_KEY')
-  const timezoneOffsetMinutes = config.timezoneOffsetMinutes ?? 480
+  const timezoneOffsetMinutes = config.timezoneOffsetMinutes ?? 0
   const balanceTimeoutMs = config.balanceTimeoutMs ?? 5_000
   const inspectConcurrency = config.inspectConcurrency ?? 8
-  const peakWindows: [number, number][] = (config.peakWindows ?? [[540, 720], [840, 1_080]]).map(pair => [pair[0], pair[1]] as [number, number])
   const maxEntries = config.projectMaxEntries ?? 2_000
   const maxFileBytes = config.projectMaxFileBytes ?? 200_000
   try { const url = new URL(baseUrl); if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error() } catch { throw new Error('dsh-workspace: baseUrl must be an absolute HTTP(S) URL') }
   if (!Number.isInteger(timezoneOffsetMinutes) || timezoneOffsetMinutes < -720 || timezoneOffsetMinutes > 840) throw new Error('dsh-workspace: timezoneOffsetMinutes must be an integer from -720 through 840')
   if (!Number.isInteger(balanceTimeoutMs) || balanceTimeoutMs < 1 || balanceTimeoutMs > 60_000) throw new Error('dsh-workspace: balanceTimeoutMs must be an integer from 1 through 60000')
   if (!Number.isInteger(inspectConcurrency) || inspectConcurrency < 1 || inspectConcurrency > 64) throw new Error('dsh-workspace: inspectConcurrency must be an integer from 1 through 64')
-  let peakWindowJson = ''
-  try { peakWindowJson = JSON.stringify(peakWindows) } catch { peakWindowJson = '' }
-  if (!Array.isArray(peakWindows) || peakWindows.length === 0 || peakWindowJson.length === 0) throw new Error('dsh-workspace: peakWindows must be a non-empty JSON-array list')
-  for (const pair of peakWindows) {
-    const start = pair[0]; const end = pair[1]
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > 1_440 || end < 0 || end > 1_440 || start === end) throw new Error('dsh-workspace: each peakWindow must be an integer [start, end] pair from 0 through 1440 with start !== end')
-  }
   if (!Number.isInteger(maxEntries) || maxEntries < 100 || maxEntries > 20_000) throw new Error('dsh-workspace: projectMaxEntries must be an integer from 100 through 20000')
   if (!Number.isInteger(maxFileBytes) || maxFileBytes < 1_024 || maxFileBytes > 2_000_000) throw new Error('dsh-workspace: projectMaxFileBytes must be an integer from 1024 through 2000000')
   const browsers = new Map<string, Promise<ProjectBrowser>>()
@@ -183,13 +171,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     return id
   }
   const requirePost = (req: IncomingMessage, res: ServerResponse, requestId: string, resource: string): boolean => {
-    if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: '仅支持 POST 请求', fields: [], requestId }, requestId); return false }
-    if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: `${resource}默认仅允许本机使用`, fields: [], requestId }, requestId); return false }
+    if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: 'Only POST requests are supported', fields: [], requestId }, requestId); return false }
+    if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: `${resource} is restricted to local requests by default`, fields: [], requestId }, requestId); return false }
     return true
   }
   const requireGet = (req: IncomingMessage, res: ServerResponse, requestId: string, resource: string): boolean => {
-    if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: '仅支持 GET 请求', fields: [], requestId }, requestId); return false }
-    if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: `${resource}默认仅允许本机使用`, fields: [], requestId }, requestId); return false }
+    if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: 'Only GET requests are supported', fields: [], requestId }, requestId); return false }
+    if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: `${resource} is restricted to local requests by default`, fields: [], requestId }, requestId); return false }
     return true
   }
   let cachedSignature: string | undefined
@@ -209,14 +197,14 @@ export function apply(ctx: Context, config: Config = {}): void {
       kind: 'exact', path,
       async handler(req, res) {
         const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-        if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: '仅支持 GET 请求', fields: [], requestId }, requestId); return }
-        if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: '项目预览默认仅允许本机读取', fields: [], requestId }, requestId); return }
+        if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: 'Only GET requests are supported', fields: [], requestId }, requestId); return }
+        if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: 'The project preview is restricted to local requests by default', fields: [], requestId }, requestId); return }
         try {
           const url = new URL(req.url ?? '/', 'http://localhost')
           sendJson(res, 200, await read(await getBrowser(await resolveProjectRoot(url)), url), requestId)
         } catch (error) {
           ctx.logger.warn(error)
-          sendJson(res, 400, { status: 400, reason: 'PROJECT_PREVIEW_FAILED', message: error instanceof Error ? error.message : '项目预览失败', fields: [], requestId }, requestId)
+          sendJson(res, 400, { status: 400, reason: 'PROJECT_PREVIEW_FAILED', message: error instanceof Error ? error.message : 'Project preview failed', fields: [], requestId }, requestId)
         }
       },
     }))
@@ -234,8 +222,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     kind: 'exact', path: '/api/v1/dsh-workspace/summary',
     async handler(req, res) {
       const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: '仅支持 GET 请求', fields: [], requestId }, requestId); return }
-      if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: '用量数据默认仅允许本机读取', fields: [], requestId }, requestId); return }
+      if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: 'Only GET requests are supported', fields: [], requestId }, requestId); return }
+      if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: 'Usage data is restricted to local requests by default', fields: [], requestId }, requestId); return }
       try {
         const now = Date.now()
         const dayStartSeconds = todayStart(now, timezoneOffsetMinutes) / 1000
@@ -246,61 +234,18 @@ export function apply(ctx: Context, config: Config = {}): void {
           fetchUsageCost(resolvedApiKey, usageCostUrl, dayStartSeconds, now / 1000, timezoneOffsetMinutes * 60, AbortSignal.timeout(balanceTimeoutMs)),
         ])
         const usage = aggregateToday(logs, now, timezoneOffsetMinutes)
-        const ratePeriod = trafficPeriodAt(now, timezoneOffsetMinutes, peakWindows)
-        const estimate = estimateCost(usage.models, ratePeriod)
+        const estimate = estimateCost(usage.models)
         sendJson(res, 200, {
           generatedAt: Math.floor(now / 1000),
           usage: { ...usage, startTime: Math.floor(usage.startTime / 1000), endTime: Math.floor(usage.endTime / 1000) },
           balance,
           estimatedCost: estimate,
           cost: { total: platformCost ?? estimate.amount, source: platformCost === null ? 'estimate' : 'platform' },
-          ratePeriod,
-          trafficSchedule: { timezoneOffsetMinutes, peakWindows },
         }, requestId)
       } catch (error) {
         ctx.logger.warn(error)
-        sendJson(res, 500, { status: 500, reason: 'SUMMARY_FAILED', message: error instanceof Error ? error.message : '读取用量失败', fields: [], requestId }, requestId)
+        sendJson(res, 500, { status: 500, reason: 'SUMMARY_FAILED', message: error instanceof Error ? error.message : 'Failed to read usage data', fields: [], requestId }, requestId)
       }
-    },
-  }))
-
-  ctx.effect(() => webServer.register({
-    kind: 'exact', path: '/api/v1/dsh-workspace/update',
-    async handler(req, res) {
-      const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); sendJson(res, 405, { status: 405, reason: 'METHOD_NOT_ALLOWED', message: '仅支持 GET 请求', fields: [], requestId }, requestId); return }
-      if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: '更新检查默认仅允许本机读取', fields: [], requestId }, requestId); return }
-      try {
-        sendJson(res, 200, await checkUpdate(), requestId)
-      } catch (error) {
-        ctx.logger.warn(error)
-        sendJson(res, 500, { status: 500, reason: 'UPDATE_CHECK_FAILED', message: error instanceof Error ? error.message : '检查更新失败', fields: [], requestId }, requestId)
-      }
-    },
-  }))
-
-  ctx.effect(() => webServer.register({
-    kind: 'exact', path: '/api/v1/dsh-workspace/update/run',
-    async handler(req, res) {
-      const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (!requirePost(req, res, requestId, '更新')) return
-      try {
-        sendJson(res, 200, await runHarnessUpdate(), requestId)
-      } catch (error) {
-        ctx.logger.warn(error)
-        sendJson(res, 500, { status: 500, reason: 'UPDATE_RUN_FAILED', message: error instanceof Error ? error.message : '更新失败', fields: [], requestId }, requestId)
-      }
-    },
-  }))
-
-  ctx.effect(() => webServer.register({
-    kind: 'exact', path: '/api/v1/dsh-workspace/update/restart',
-    async handler(req, res) {
-      const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (!requirePost(req, res, requestId, '重启')) return
-      sendJson(res, 200, { ok: true }, requestId)
-      relaunchHarness()
-      setTimeout(() => process.exit(0), 1_000)
     },
   }))
 
@@ -308,13 +253,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     kind: 'exact', path: '/api/v1/dsh-workspace/pty/open',
     async handler(req, res) {
       const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (!requireGet(req, res, requestId, '终端')) return
+      if (!requireGet(req, res, requestId, 'The terminal')) return
       try {
         const url = new URL(req.url ?? '/', 'http://localhost')
         sendJson(res, 200, { id: await openPty(url) }, requestId)
       } catch (error) {
         ctx.logger.warn(error)
-        sendJson(res, 400, { status: 400, reason: 'PTY_OPEN_FAILED', message: error instanceof Error ? error.message : '打开终端失败', fields: [], requestId }, requestId)
+        sendJson(res, 400, { status: 400, reason: 'PTY_OPEN_FAILED', message: error instanceof Error ? error.message : 'Failed to open terminal', fields: [], requestId }, requestId)
       }
     },
   }))
@@ -322,11 +267,11 @@ export function apply(ctx: Context, config: Config = {}): void {
     kind: 'exact', path: '/api/v1/dsh-workspace/pty/read',
     async handler(req, res) {
       const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (!requireGet(req, res, requestId, '终端')) return
+      if (!requireGet(req, res, requestId, 'The terminal')) return
       const url = new URL(req.url ?? '/', 'http://localhost')
       const id = url.searchParams.get('id')
       const session = id !== null ? ptys.get(id) : undefined
-      if (session === undefined) { sendJson(res, 404, { status: 404, reason: 'PTY_NOT_FOUND', message: '终端会话不存在', fields: [], requestId }, requestId); return }
+      if (session === undefined) { sendJson(res, 404, { status: 404, reason: 'PTY_NOT_FOUND', message: 'Terminal session not found', fields: [], requestId }, requestId); return }
       const sinceText = url.searchParams.get('since')
       const since = Number(sinceText ?? '0')
       sendJson(res, 200, { output: session.output.slice(Number.isFinite(since) ? since : 0), count: session.output.length }, requestId)
@@ -336,18 +281,18 @@ export function apply(ctx: Context, config: Config = {}): void {
     kind: 'exact', path: '/api/v1/dsh-workspace/pty/write',
     async handler(req, res) {
       const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (!requirePost(req, res, requestId, '终端')) return
+      if (!requirePost(req, res, requestId, 'The terminal')) return
       try {
         const body = await readJson(req) as { id?: unknown; data?: unknown } | null
         const id = typeof body?.id === 'string' ? body.id : ''
         const data = typeof body?.data === 'string' ? body.data : ''
         const session = id.length > 0 ? ptys.get(id) : undefined
-        if (session === undefined) { sendJson(res, 404, { status: 404, reason: 'PTY_NOT_FOUND', message: '终端会话不存在', fields: [], requestId }, requestId); return }
+        if (session === undefined) { sendJson(res, 404, { status: 404, reason: 'PTY_NOT_FOUND', message: 'Terminal session not found', fields: [], requestId }, requestId); return }
         if (data.length > 0) session.pty.write(data)
         sendJson(res, 200, { ok: true }, requestId)
       } catch (error) {
         ctx.logger.warn(error)
-        sendJson(res, 400, { status: 400, reason: 'PTY_WRITE_FAILED', message: error instanceof Error ? error.message : '写入终端失败', fields: [], requestId }, requestId)
+        sendJson(res, 400, { status: 400, reason: 'PTY_WRITE_FAILED', message: error instanceof Error ? error.message : 'Failed to write to terminal', fields: [], requestId }, requestId)
       }
     },
   }))
@@ -355,19 +300,19 @@ export function apply(ctx: Context, config: Config = {}): void {
     kind: 'exact', path: '/api/v1/dsh-workspace/pty/resize',
     async handler(req, res) {
       const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (!requirePost(req, res, requestId, '终端')) return
+      if (!requirePost(req, res, requestId, 'The terminal')) return
       try {
         const body = await readJson(req) as { id?: unknown; cols?: unknown; rows?: unknown } | null
         const id = typeof body?.id === 'string' ? body.id : ''
         const cols = typeof body?.cols === 'number' ? body.cols : 80
         const rows = typeof body?.rows === 'number' ? body.rows : 24
         const session = id.length > 0 ? ptys.get(id) : undefined
-        if (session === undefined) { sendJson(res, 404, { status: 404, reason: 'PTY_NOT_FOUND', message: '终端会话不存在', fields: [], requestId }, requestId); return }
+        if (session === undefined) { sendJson(res, 404, { status: 404, reason: 'PTY_NOT_FOUND', message: 'Terminal session not found', fields: [], requestId }, requestId); return }
         session.pty.resize(Math.max(2, cols), Math.max(2, rows))
         sendJson(res, 200, { ok: true }, requestId)
       } catch (error) {
         ctx.logger.warn(error)
-        sendJson(res, 400, { status: 400, reason: 'PTY_RESIZE_FAILED', message: error instanceof Error ? error.message : '调整终端尺寸失败', fields: [], requestId }, requestId)
+        sendJson(res, 400, { status: 400, reason: 'PTY_RESIZE_FAILED', message: error instanceof Error ? error.message : 'Failed to resize terminal', fields: [], requestId }, requestId)
       }
     },
   }))
@@ -375,7 +320,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     kind: 'exact', path: '/api/v1/dsh-workspace/pty/close',
     async handler(req, res) {
       const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
-      if (!requirePost(req, res, requestId, '终端')) return
+      if (!requirePost(req, res, requestId, 'The terminal')) return
       try {
         const body = await readJson(req) as { id?: unknown } | null
         const id = typeof body?.id === 'string' ? body.id : ''
@@ -384,7 +329,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         sendJson(res, 200, { ok: true }, requestId)
       } catch (error) {
         ctx.logger.warn(error)
-        sendJson(res, 400, { status: 400, reason: 'PTY_CLOSE_FAILED', message: error instanceof Error ? error.message : '关闭终端失败', fields: [], requestId }, requestId)
+        sendJson(res, 400, { status: 400, reason: 'PTY_CLOSE_FAILED', message: error instanceof Error ? error.message : 'Failed to close terminal', fields: [], requestId }, requestId)
       }
     },
   }))

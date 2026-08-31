@@ -30,6 +30,6 @@ test('previews files and Git changes without escaping the root', async () => {
   const outside = await mkdtemp(join(tmpdir(), 'dsh-workspace-outside-'))
   await writeFile(join(outside, 'secret'), 'secret')
   await symlink(join(outside, 'secret'), join(root, 'escape'))
-  await assert.rejects(browser.read('../secret'), /超出项目目录/)
-  await assert.rejects(browser.read('escape'), /符号链接目标超出项目目录/)
+  await assert.rejects(browser.read('../secret'), /escapes the project root/)
+  await assert.rejects(browser.read('escape'), /Symlink target escapes the project root/)
 })

@@ -5,11 +5,10 @@
       config:
         baseUrl: https://api.deepseek.com
         apiKeyEnv: DEEPSEEK_API_KEY
-        timezoneOffsetMinutes: 480
+        # Local timezone for the "today" boundary: Europe/Berlin (UTC+2 CEST / UTC+1 CET).
+        timezoneOffsetMinutes: 120
         balanceTimeoutMs: 5000
         inspectConcurrency: 8
-        idleStartMinutes: 30
-        idleEndMinutes: 510
         projectMaxEntries: 2000
         projectMaxFileBytes: 200000
         allowRemote: false

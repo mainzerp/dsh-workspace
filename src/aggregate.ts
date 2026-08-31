@@ -30,7 +30,7 @@ export function todayStart(now: number, offset: number): number {
 function key(turn: number, step: number): string { return `${turn}/${step}` }
 
 /** @param logs persisted session logs. @param now right boundary. @param offset local-day offset. @returns today's usage. */
-export function aggregateToday(logs: readonly (readonly SessionEvent[])[], now: number, offset = 480): UsageSummary {
+export function aggregateToday(logs: readonly (readonly SessionEvent[])[], now: number, offset = 0): UsageSummary {
   const startTime = todayStart(now, offset)
   const totals = emptyUsage()
   const byModel = new Map<string, MutableUsage>()
