@@ -29,8 +29,31 @@ export interface ProjectFilePreview {
   dataUrl?: string
 }
 
+/** Text file save request body. */
+export interface ProjectFileWriteRequest {
+  path: string
+  content: string
+  overwrite?: boolean
+}
+
+/** Root-level file upload request body (basename only, base64 payload). */
+export interface ProjectFileUploadRequest {
+  name: string
+  dataBase64: string
+  overwrite?: boolean
+}
+
+/** Success response of the file write and upload endpoints. */
+export interface ProjectFileWriteResult {
+  path: string
+  bytes: number
+}
+
 /** Git diff preview response. */
 export interface GitDiffPreview { path: string; diff: string; truncated: boolean }
+
+/** A git ref decorating a commit (parsed from %D). */
+export interface GitLogRef { name: string; kind: 'branch' | 'remote' | 'tag' | 'head' }
 
 /** One commit in the project history. */
 export interface GitLogEntry {
@@ -39,6 +62,8 @@ export interface GitLogEntry {
   author: string
   timestamp: number
   subject: string
+  parents: string[]
+  refs: GitLogRef[]
 }
 
 /** Bounded git commit history response. */

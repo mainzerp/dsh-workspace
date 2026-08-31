@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { access, open, readdir, realpath } from 'node:fs/promises'
+import { access, open, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import type { GitChange, GitCommitPreview, GitDiffPreview, GitLogPreview, ProjectFilePreview, ProjectSnapshot, ProjectTreeEntry } from './types.js'
+import type { GitChange, GitCommitPreview, GitDiffPreview, GitLogPreview, GitLogRef, ProjectFilePreview, ProjectSnapshot, ProjectTreeEntry } from './types.js'
 
 const execFileAsync = promisify(execFile)
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'lib', 'coverage', '.next', '.cache'])
@@ -12,7 +13,34 @@ const IMAGE_MIME = new Map([
   ['.webp', 'image/webp'], ['.svg', 'image/svg+xml'], ['.bmp', 'image/bmp'], ['.ico', 'image/x-icon'],
 ])
 
-/** Read-only, root-confined project and Git preview implementation. */
+/** @param decorations git %D output, e.g. `HEAD -> main, origin/main, tag: v1.2.0`. @returns typed refs. Note: %D gives no full ref paths, so a LOCAL branch named `feature/foo` is classified as `remote`. */
+export function parseGitLogRefs(decorations: string): GitLogRef[] {
+  const trimmed = decorations.trim()
+  if (trimmed.length === 0) return []
+  const refs: GitLogRef[] = []
+  for (const raw of trimmed.split(', ')) {
+    const item = raw.trim()
+    if (item.length === 0) continue
+    if (item === 'HEAD') { refs.push({ name: 'HEAD', kind: 'head' }); continue }
+    if (item.startsWith('HEAD -> ')) {
+      refs.push({ name: 'HEAD', kind: 'head' })
+      refs.push({ name: item.slice('HEAD -> '.length), kind: 'branch' })
+      continue
+    }
+    if (item.startsWith('tag: ')) { refs.push({ name: item.slice('tag: '.length), kind: 'tag' }); continue }
+    refs.push({ name: item, kind: item.includes('/') ? 'remote' : 'branch' })
+  }
+  return refs
+}
+
+/** Machine-readable error codes produced by the write operations. */
+export type ProjectWriteErrorCode = 'FILE_EXISTS' | 'FILE_TOO_LARGE' | 'BINARY_CONTENT' | 'IS_DIRECTORY'
+
+function writeError(code: ProjectWriteErrorCode, message: string): Error {
+  return Object.assign(new Error(message), { code })
+}
+
+/** Root-confined project browser: read-only previews plus confined, size-capped file writes and root-level uploads. All writes stay inside `projectRoot`; traversal and symlink escapes are rejected, overwrite is opt-in. */
 export class ProjectBrowser {
   readonly #root: string
   readonly #maxEntries: number
@@ -108,6 +136,64 @@ export class ProjectBrowser {
     }
   }
 
+  async #assertWritableTarget(absolute: string): Promise<void> {
+    const stats = await stat(absolute)
+    if (stats.isDirectory()) throw writeError('IS_DIRECTORY', 'Cannot write to a directory')
+    if (stats.size > this.#maxFileBytes) throw writeError('FILE_TOO_LARGE', `File exceeds the ${this.#maxFileBytes}-byte limit and cannot be saved safely`)
+  }
+
+  async #atomicWrite(absolute: string, data: Buffer, overwrite: boolean): Promise<void> {
+    if (!overwrite) {
+      let handle
+      try {
+        handle = await open(absolute, 'wx')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw writeError('FILE_EXISTS', 'File already exists; pass overwrite to replace it')
+        throw error
+      }
+      try { await handle.writeFile(data) } finally { await handle.close() }
+      return
+    }
+    const temp = `${absolute}.tmp-${randomBytes(6).toString('hex')}`
+    try {
+      await writeFile(temp, data)
+      await rename(temp, absolute)
+    } catch (error) {
+      await rm(temp, { force: true }).catch(() => undefined)
+      throw error
+    }
+  }
+
+  /** @param input relative path of an existing text file. @param content new UTF-8 content. @returns written path and byte count. */
+  async write(input: string, content: string): Promise<{ path: string; bytes: number }> {
+    const target = await this.#resolveFile(input)
+    const data = Buffer.from(content, 'utf8')
+    if (data.byteLength > this.#maxFileBytes) throw writeError('FILE_TOO_LARGE', `Content exceeds the ${this.#maxFileBytes}-byte limit`)
+    if (content.includes('\0')) throw writeError('BINARY_CONTENT', 'Binary content cannot be saved through the text editor')
+    await this.#assertWritableTarget(target.absolute)
+    await this.#atomicWrite(target.absolute, data, true)
+    return { path: target.path, bytes: data.byteLength }
+  }
+
+  /** @param name root-level basename. @param data raw bytes. @param overwrite allow replacing an existing file. @returns written path and byte count. */
+  async upload(name: string, data: Buffer, overwrite: boolean): Promise<{ path: string; bytes: number }> {
+    if (name.length === 0 || name.includes('/') || name.includes('\\') || name.includes('\0') || name === '.' || name === '..') {
+      throw new Error('Invalid upload file name')
+    }
+    const target = await this.#resolveFile(name, true)
+    const existing = await stat(target.absolute).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    })
+    if (existing !== null) {
+      if (existing.isDirectory()) throw writeError('IS_DIRECTORY', 'Cannot overwrite a directory')
+      if (!overwrite) throw writeError('FILE_EXISTS', 'File already exists; pass overwrite to replace it')
+    }
+    if (data.byteLength > this.#maxFileBytes) throw writeError('FILE_TOO_LARGE', `Upload exceeds the ${this.#maxFileBytes}-byte limit`)
+    await this.#atomicWrite(target.absolute, data, overwrite)
+    return { path: target.path, bytes: data.byteLength }
+  }
+
   /** @param input relative changed-file path. @returns bounded Git diff. */
   async diff(input: string): Promise<GitDiffPreview> {
     const target = await this.#resolveFile(input, true)
@@ -121,17 +207,25 @@ export class ProjectBrowser {
     return { path: target.path, diff: encoded.subarray(0, this.#maxFileBytes).toString('utf8'), truncated: encoded.byteLength > this.#maxFileBytes }
   }
 
-  /** @param input optional relative file path to filter history. @param limit max commits. @returns bounded commit history. */
+  /** @param input optional relative file path to filter history. @param limit max commits. @returns bounded commit history across all refs in topo order. */
   async logs(input: string | undefined, limit: number): Promise<GitLogPreview> {
-    const args = ['log', `--pretty=format:%H%x1f%an%x1f%at%x1f%s`, '-n', String(limit)]
+    const args = ['log', '--all', '--topo-order', `--pretty=format:%H%x1f%P%x1f%an%x1f%at%x1f%D%x1f%s`, '-n', String(limit)]
     if (input !== undefined && input.length > 0) {
       const target = await this.#resolveFile(input)
       args.push('--', target.path)
     }
     const stdout = await this.#git(args)
     const entries = stdout.split('\n').filter(Boolean).map(line => {
-      const [hash, author, timestamp, subject] = line.split('\x1f')
-      return { hash: hash ?? '', shortHash: (hash ?? '').slice(0, 8), author: author ?? '', timestamp: Number(timestamp ?? 0), subject: subject ?? '' }
+      const [hash, parents, author, timestamp, decorations, subject] = line.split('\x1f')
+      return {
+        hash: hash ?? '',
+        shortHash: (hash ?? '').slice(0, 8),
+        author: author ?? '',
+        timestamp: Number(timestamp ?? 0),
+        subject: subject ?? '',
+        parents: (parents ?? '').split(' ').filter(Boolean),
+        refs: parseGitLogRefs(decorations ?? ''),
+      }
     })
     return { entries }
   }

@@ -1,7 +1,18 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { ComponentType, PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { ChangeEvent, ComponentType, PointerEvent as ReactPointerEvent } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
-import { AtSign, Blocks, ChevronDown, ChevronRight, Database, Eraser, FileArchive, FileAudio, FileCode, FileImage, FileSpreadsheet, FileText, FileVideo, Folder, FolderOpen, FolderTree, GitBranch, RefreshCw, Terminal, X } from 'lucide-react'
+import { EditorView, basicSetup } from 'codemirror'
+import { EditorState } from '@codemirror/state'
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import type { LanguageSupport } from '@codemirror/language'
+import { javascript } from '@codemirror/lang-javascript'
+import { python } from '@codemirror/lang-python'
+import { css } from '@codemirror/lang-css'
+import { html } from '@codemirror/lang-html'
+import { json } from '@codemirror/lang-json'
+import { rust } from '@codemirror/lang-rust'
+import { markdown } from '@codemirror/lang-markdown'
+import { AtSign, Blocks, ChevronDown, ChevronRight, Database, Eraser, FileArchive, FileAudio, FileCode, FileImage, FileSpreadsheet, FileText, FileVideo, Folder, FolderOpen, FolderTree, GitBranch, RefreshCw, Terminal, Upload, X } from 'lucide-react'
 import { SiC, SiCplusplus, SiCss, SiGnubash, SiGo, SiHtml5, SiJavascript, SiJson, SiMarkdown, SiOpenjdk, SiPython, SiRust, SiSqlite, SiSvelte, SiTypescript, SiVuedotjs, SiYaml } from 'react-icons/si'
 import type { LanguageFn } from 'highlight.js'
 import hljs from 'highlight.js/lib/core'
@@ -14,6 +25,7 @@ import iniLang from 'highlight.js/lib/languages/ini'
 import javaLang from 'highlight.js/lib/languages/java'
 import javascriptLang from 'highlight.js/lib/languages/javascript'
 import jsonLang from 'highlight.js/lib/languages/json'
+import markdownLang from 'highlight.js/lib/languages/markdown'
 import powershellLang from 'highlight.js/lib/languages/powershell'
 import pythonLang from 'highlight.js/lib/languages/python'
 import rustLang from 'highlight.js/lib/languages/rust'
@@ -21,13 +33,15 @@ import sqlLang from 'highlight.js/lib/languages/sql'
 import typescriptLang from 'highlight.js/lib/languages/typescript'
 import xmlLang from 'highlight.js/lib/languages/xml'
 import yamlLang from 'highlight.js/lib/languages/yaml'
-import type { GitCommitPreview, GitDiffPreview, GitLogEntry, GitLogPreview, ProjectFilePreview, ProjectSnapshot, UsageSnapshot } from '../types.js'
+import type { GitCommitPreview, GitDiffPreview, GitLogEntry, GitLogPreview, GitLogRef, ProjectFilePreview, ProjectFileWriteResult, ProjectSnapshot, UsageSnapshot } from '../types.js'
 import { t } from './i18n.js'
+import { computeGraphLayout, GRAPH_LANE_WIDTH, GRAPH_ROW_HEIGHT, LANE_PALETTE } from './graph.js'
 
 const HIGHLIGHT_LANGUAGES: ReadonlyArray<readonly [string, LanguageFn]> = [
   ['bash', bashLang], ['c', cLang], ['cpp', cppLang], ['css', cssLang], ['go', goLang],
   ['ini', iniLang], ['java', javaLang], ['javascript', javascriptLang], ['json', jsonLang],
   ['powershell', powershellLang], ['python', pythonLang], ['rust', rustLang], ['sql', sqlLang],
+  ['markdown', markdownLang],
   ['typescript', typescriptLang], ['xml', xmlLang], ['yaml', yamlLang],
 ]
 for (const [name, language] of HIGHLIGHT_LANGUAGES) hljs.registerLanguage(name, language)
@@ -41,7 +55,7 @@ const HLJS_BY_EXTENSION: Readonly<Record<string, string>> = {
   c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp', hh: 'cpp',
   sh: 'bash', bash: 'bash', zsh: 'bash', ps1: 'powershell',
   sql: 'sql', yml: 'yaml', yaml: 'yaml', toml: 'ini',
-  json: 'json', jsonc: 'json',
+  json: 'json', jsonc: 'json', md: 'markdown', mdx: 'markdown',
 }
 
 function hljsLanguageOf(path: string): string | undefined {
@@ -117,15 +131,14 @@ interface SessionsService {
 }
 interface ClientContext { slots: SlotsService; sessions: SessionsService; effect(callback: () => void | (() => void), label?: string): unknown }
 
-type EditorPresentation = 'code' | 'diff' | 'json' | 'markdown' | 'image' | 'text' | 'binary'
-const CODE_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'css', 'scss', 'html', 'vue', 'svelte', 'py', 'go', 'rs', 'java', 'c', 'h', 'cpp', 'hpp', 'sh', 'bash', 'zsh', 'ps1', 'sql', 'yml', 'yaml', 'toml', 'xml'])
+type EditorPresentation = 'code' | 'diff' | 'json' | 'image' | 'text' | 'binary'
+const CODE_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'css', 'scss', 'html', 'vue', 'svelte', 'py', 'go', 'rs', 'java', 'c', 'h', 'cpp', 'hpp', 'sh', 'bash', 'zsh', 'ps1', 'sql', 'yml', 'yaml', 'toml', 'xml', 'md', 'mdx'])
 
 function presentationOf(path: string, source: 'file' | 'diff' | 'commit', binary: boolean, dataUrl: string | undefined): EditorPresentation {
   if (source === 'diff' || source === 'commit') return 'diff'
   if (dataUrl !== undefined) return 'image'
   if (binary) return 'binary'
   const extension = path.split('.').at(-1)?.toLowerCase() ?? ''
-  if (extension === 'md' || extension === 'mdx') return 'markdown'
   if (extension === 'json' || extension === 'jsonc') return 'json'
   return CODE_EXTENSIONS.has(extension) ? 'code' : 'text'
 }
@@ -144,6 +157,13 @@ function commitTime(timestamp: number): string {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
 }
 
+function refTooltip(ref: GitLogRef): string {
+  if (ref.kind === 'branch') return t.refBranch(ref.name)
+  if (ref.kind === 'remote') return t.refRemote(ref.name)
+  if (ref.kind === 'tag') return t.refTag(ref.name)
+  return t.refHead
+}
+
 function CodePreview({ content, diff = false, language }: { content: string; diff?: boolean; language?: string | undefined }) {
   const body = language === undefined ? escapeHtml(content) : (() => {
     try { return hljs.highlight(content, { language }).value } catch { return escapeHtml(content) }
@@ -152,15 +172,68 @@ function CodePreview({ content, diff = false, language }: { content: string; dif
   return <div className="hui-code-view">{lines.map((line, index) => <div className="hui-code-line" data-change={diff ? line.startsWith('+') ? 'add' : line.startsWith('-') ? 'delete' : undefined : undefined} key={index}><span>{index + 1}</span><code dangerouslySetInnerHTML={{ __html: line || ' ' }} /></div>)}</div>
 }
 
-function MarkdownPreview({ content }: { content: string }) {
-  return <article className="hui-markdown-view">{content.split('\n').map((line, index) => {
-    const heading = /^(#{1,4})\s+(.+)$/.exec(line)
-    if (heading !== null) { const level = heading[1]?.length ?? 1; return <div className="hui-md-heading" data-level={level} key={index}>{heading[2]}</div> }
-    if (/^[-*]\s+/.test(line)) return <div className="hui-md-list" key={index}><span>•</span>{line.replace(/^[-*]\s+/, '')}</div>
-    if (line.startsWith('> ')) return <blockquote key={index}>{line.slice(2)}</blockquote>
-    if (line.startsWith('```')) return <div className="hui-md-fence" key={index}>{line.slice(3) || 'code'}</div>
-    return line.length === 0 ? <div className="hui-md-space" key={index} /> : <p key={index}>{line}</p>
-  })}</article>
+function codemirrorLanguageOf(path: string): LanguageSupport | undefined {
+  const extension = path.split('.').at(-1)?.toLowerCase() ?? ''
+  switch (extension) {
+    case 'js': case 'mjs': case 'cjs': return javascript()
+    case 'jsx': return javascript({ jsx: true })
+    case 'ts': return javascript({ typescript: true })
+    case 'tsx': return javascript({ typescript: true, jsx: true })
+    case 'py': return python()
+    case 'css': case 'scss': return css()
+    case 'html': case 'htm': case 'vue': case 'svelte': return html()
+    case 'json': case 'jsonc': return json()
+    case 'rs': return rust()
+    case 'md': case 'mdx': return markdown()
+    default: return undefined
+  }
+}
+
+function CodeEditor({ path, initialContent, saving, onSave, onCancel }: { path: string; initialContent: string; saving: boolean; onSave(content: string): void; onCancel(): void }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
+  useEffect(() => {
+    const container = containerRef.current
+    if (container === null) return
+    const language = codemirrorLanguageOf(path)
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: initialContent,
+        extensions: [
+          basicSetup,
+          ...(language === undefined ? [] : [language]),
+          syntaxHighlighting(defaultHighlightStyle),
+          EditorView.theme({
+            '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--dsw-alias-bg-base, #fff)', color: 'var(--dsw-alias-label-primary, #172033)' },
+            '.cm-content': { fontFamily: '"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace', lineHeight: '1.65' },
+            '.cm-gutters': { backgroundColor: 'var(--dsw-alias-bg-module-platform, #fafbfc)', color: 'var(--dsw-alias-label-tertiary, #8a93a5)', border: 'none' },
+            '.cm-activeLine': { backgroundColor: 'var(--dsw-alias-interactive-bg-hover, #eef0f4)' },
+            '&.cm-focused': { outline: 'none' },
+          }),
+        ],
+      }),
+      parent: container,
+    })
+    viewRef.current = view
+    view.focus()
+    return () => { view.destroy(); viewRef.current = null }
+  }, [path, initialContent])
+  const save = useCallback(() => {
+    const view = viewRef.current
+    if (view !== null) onSave(view.state.doc.toString())
+  }, [onSave])
+  const cancel = useCallback(() => {
+    const view = viewRef.current
+    if (view !== null && view.state.doc.toString() !== initialContent && !window.confirm(t.editorDiscardChanges)) return
+    onCancel()
+  }, [initialContent, onCancel])
+  return <div className="hui-editor-edit">
+    <div className="hui-editor-cm" ref={containerRef} />
+    <div className="hui-editor-actions">
+      <button type="button" data-primary="true" disabled={saving} onClick={save}>{saving ? t.editorSaving : t.editorSave}</button>
+      <button type="button" disabled={saving} onClick={cancel}>{t.editorCancel}</button>
+    </div>
+  </div>
 }
 
 interface DraftBridge {
@@ -282,6 +355,13 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
   const [previewSource, setPreviewSource] = useState<'file' | 'diff' | 'commit'>('file')
   const [previewBinary, setPreviewBinary] = useState(false)
   const [previewDataUrl, setPreviewDataUrl] = useState<string | undefined>(undefined)
+  const [truncated, setTruncated] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draftContent, setDraftContent] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [editorError, setEditorError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [changesOpen, setChangesOpen] = useState(true)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -331,11 +411,16 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     setPreview('')
     setPreviewBinary(false)
     setPreviewDataUrl(undefined)
+    setTruncated(false)
+    setEditing(false)
+    setDraftContent('')
+    setSaving(false)
+    setEditorError(null)
     setExpanded(new Set())
     setGitLog(null)
   }, [sessionId])
   const open = useCallback((path: string, kind: 'file' | 'diff') => {
-    setSelected(path); setPreview(t.loading); setPreviewSource(kind); setPreviewBinary(false); setPreviewDataUrl(undefined)
+    setSelected(path); setPreview(t.loading); setPreviewSource(kind); setPreviewBinary(false); setPreviewDataUrl(undefined); setTruncated(false); setEditing(false); setEditorError(null)
     const endpoint = kind === 'file' ? '/api/v1/dsh-workspace/file' : '/api/v1/dsh-workspace/diff'
     const params = new URLSearchParams({ path })
     if (sessionId !== undefined) params.set('sessionId', sessionId)
@@ -347,6 +432,7 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
       if ('content' in data) {
         setPreviewBinary(data.binary)
         setPreviewDataUrl(data.dataUrl)
+        setTruncated(data.truncated)
         setPreview(data.content + (data.truncated ? t.previewTruncated : ''))
       } else setPreview((data.diff || t.noTextualDiffForChange) + (data.truncated ? t.previewTruncated : ''))
     }).catch(reason => setPreview(t.readFailed(reason instanceof Error ? reason.message : String(reason))))
@@ -362,6 +448,7 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     const params = new URLSearchParams()
     if (sessionId !== undefined) params.set('sessionId', sessionId)
     if (cwd !== undefined) params.set('cwd', cwd)
+    params.set('limit', '200')
     const query = params.size === 0 ? '' : `?${params.toString()}`
     void fetch(`/api/v1/dsh-workspace/logs${query}`).then(async response => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -391,8 +478,13 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     return true
   })
   const selectedName = selected?.split('/').at(-1)
+  const graphLayout = useMemo(() => gitLog === null || gitLog.length === 0 ? null : computeGraphLayout(gitLog), [gitLog])
   const presentation = selected === null ? 'text' : presentationOf(selected, previewSource, previewBinary, previewDataUrl)
-  const closeFile = useCallback(() => { setSelected(null); setPreview(''); setPreviewBinary(false); setPreviewDataUrl(undefined) }, [])
+  const editable = selected !== null && previewSource === 'file' && !previewBinary && !truncated && (presentation === 'code' || presentation === 'json' || presentation === 'text')
+  const closeFile = useCallback(() => {
+    setSelected(null); setPreview(''); setPreviewBinary(false); setPreviewDataUrl(undefined)
+    setTruncated(false); setEditing(false); setDraftContent(''); setSaving(false); setEditorError(null)
+  }, [])
   const attachFile = useCallback((path: string) => {
     if (sessionId === undefined) return
     const bridge = draftBridges.get(sessionId)
@@ -402,14 +494,99 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     const next = draft.length === 0 ? token : `${draft.replace(/\s+$/, '')} ${token}`
     bridge.write(next)
   }, [sessionId])
+  const startEdit = useCallback(() => {
+    if (selected === null) return
+    setEditorError(null)
+    const params = new URLSearchParams({ path: selected })
+    if (sessionId !== undefined) params.set('sessionId', sessionId)
+    if (cwd !== undefined) params.set('cwd', cwd)
+    void fetch(`/api/v1/dsh-workspace/file?${params.toString()}`).then(async response => {
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { message?: string } | null
+        throw new Error(data?.message ?? `HTTP ${response.status}`)
+      }
+      return await response.json() as ProjectFilePreview
+    }).then(data => {
+      setTruncated(data.truncated)
+      setPreviewBinary(data.binary)
+      if (data.truncated || data.binary) return
+      setDraftContent(data.content)
+      setEditing(true)
+    }).catch(reason => setEditorError(reason instanceof Error ? reason.message : String(reason)))
+  }, [cwd, selected, sessionId])
+  const saveFile = useCallback((content: string) => {
+    if (selected === null) return
+    setSaving(true)
+    setEditorError(null)
+    const params = new URLSearchParams()
+    if (sessionId !== undefined) params.set('sessionId', sessionId)
+    if (cwd !== undefined) params.set('cwd', cwd)
+    const query = params.size === 0 ? '' : `?${params.toString()}`
+    void fetch(`/api/v1/dsh-workspace/file/write${query}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: selected, content }),
+    }).then(async response => {
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { reason?: string; message?: string } | null
+        throw new Error(data?.reason ?? data?.message ?? `HTTP ${response.status}`)
+      }
+      return await response.json() as ProjectFileWriteResult
+    }).then(() => {
+      setSaving(false)
+      setEditing(false)
+      setDraftContent('')
+      open(selected, 'file')
+      refresh()
+    }).catch(reason => {
+      setSaving(false)
+      setEditorError(t.editorSaveFailed(reason instanceof Error ? reason.message : String(reason)))
+    })
+  }, [cwd, open, refresh, selected, sessionId])
+  const cancelEdit = useCallback(() => {
+    setEditing(false)
+    setDraftContent('')
+    setSaving(false)
+    setEditorError(null)
+  }, [])
+  const uploadFile = useCallback(async (file: File, overwrite: boolean) => {
+    const buffer = new Uint8Array(await file.arrayBuffer())
+    let binary = ''
+    for (let index = 0; index < buffer.length; index += 32_768) binary += String.fromCharCode(...buffer.subarray(index, index + 32_768))
+    const params = new URLSearchParams()
+    if (sessionId !== undefined) params.set('sessionId', sessionId)
+    if (cwd !== undefined) params.set('cwd', cwd)
+    const query = params.size === 0 ? '' : `?${params.toString()}`
+    const response = await fetch(`/api/v1/dsh-workspace/file/upload${query}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: file.name, dataBase64: btoa(binary), overwrite }),
+    })
+    if (response.ok) {
+      setNotice(t.uploadDone(file.name))
+      refresh()
+      return
+    }
+    const data = await response.json().catch(() => null) as { reason?: string; message?: string } | null
+    if (response.status === 409 && data?.reason === 'FILE_EXISTS') {
+      if (window.confirm(t.uploadOverwriteConfirm(file.name))) await uploadFile(file, true)
+      return
+    }
+    setError(t.uploadFailed(data?.reason ?? data?.message ?? `HTTP ${response.status}`))
+  }, [cwd, refresh, sessionId])
+  const onUploadPick = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file === undefined) return
+    uploadFile(file, false).catch(reason => setError(t.uploadFailed(reason instanceof Error ? reason.message : String(reason))))
+  }, [uploadFile])
   return <aside className="hui-drawer" aria-label={t.projectPreview} style={effectiveWidth === null ? undefined : { width: effectiveWidth }}>
     <div className="hui-resizer" aria-hidden="true" onPointerDown={startResize} />
     <header className="hui-titlebar"><div><span className="hui-vscode-mark"><Blocks size={14} /></span><span title={snapshot?.rootPath}>{snapshot?.rootPath ?? t.loadingCurrentProject}</span></div></header>
     {error ? <div className="hui-error">{error}<button type="button" onClick={() => setError(null)} aria-label={t.dismiss} title={t.dismiss}><X size={12} /></button></div> : null}
+    {notice ? <div className="hui-notice">{notice}<button type="button" onClick={() => setNotice(null)} aria-label={t.dismiss} title={t.dismiss}><X size={12} /></button></div> : null}
     <div className="hui-workbench" data-preview={(selected !== null && mode !== 'terminal') || undefined}>
       <nav className="hui-activity" aria-label={t.projectViews}><button type="button" aria-label={t.explorer} title={t.explorer} data-active={mode === 'files' || undefined} onClick={() => setMode('files')}><FolderTree size={20} /></button><button type="button" aria-label={t.sourceControl} title={t.sourceControl} data-active={mode === 'changes' || undefined} onClick={() => setMode('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button></nav>
       <section className="hui-explorer">
-        <header><strong>{mode === 'files' ? t.explorer : mode === 'changes' ? t.sourceControl : t.terminal}</strong>{mode !== 'terminal' ? <button type="button" onClick={refresh} aria-label={t.refresh}><RefreshCw size={15} /></button> : null}</header>
+        <header><strong>{mode === 'files' ? t.explorer : mode === 'changes' ? t.sourceControl : t.terminal}</strong>{mode !== 'terminal' ? <><button type="button" onClick={() => fileInputRef.current?.click()} aria-label={t.upload} title={t.upload}><Upload size={15} /></button><button type="button" onClick={refresh} aria-label={t.refresh} title={t.refresh}><RefreshCw size={15} /></button></> : null}</header>
+        {mode !== 'terminal' ? <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={onUploadPick} /> : null}
         {mode === 'terminal' ? <TerminalPanel sessionId={sessionId} cwd={cwd} /> : mode === 'files' ? <>
         <div className="hui-section-title"><ChevronDown size={14} /><b>{snapshot?.rootName?.toUpperCase() ?? 'PROJECT'}</b></div>
         <div className="hui-tree" role="tree">
@@ -425,13 +602,36 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
         </div> : null}
         <div className="hui-section-title" role="button" title={historyOpen ? t.collapseHistory : t.expandHistory} onClick={() => setHistoryOpen(current => !current)}>{historyOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<b>HISTORY</b><em>{gitLog?.length ?? 0}</em></div>
         {historyOpen ? <div className="hui-tree">
-          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">{t.notGitRepository}</div> : gitLog === null ? <div className="hui-empty-small">{t.loadingHistory}</div> : gitLog.length === 0 ? <div className="hui-empty-small">{t.noCommits}</div> : gitLog.map(entry => <button type="button" key={entry.hash} className="hui-tree-row hui-commit" data-selected={selected === entry.hash || undefined} title={`${entry.subject}\n${entry.author}\n${new Date(entry.timestamp * 1000).toLocaleString()}`} onClick={() => openCommit(entry.hash)}><span className="hui-commit-meta"><b>{entry.shortHash}</b><small>{commitTime(entry.timestamp)}</small></span><span>{entry.subject}</span></button>)}
+          {snapshot?.gitAvailable === false ? <div className="hui-empty-small">{t.notGitRepository}</div>
+           : gitLog === null ? <div className="hui-empty-small">{t.loadingHistory}</div>
+           : gitLog.length === 0 || graphLayout === null ? <div className="hui-empty-small">{t.noCommits}</div>
+           : <div className="hui-graph" role="list" aria-label={t.historyGraph}>
+              <svg className="hui-graph-edges" width={graphLayout.laneCount * GRAPH_LANE_WIDTH} height={gitLog.length * GRAPH_ROW_HEIGHT} aria-hidden="true">
+                {graphLayout.edges.map((edge, index) => {
+                  const x1 = edge.from.lane * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2
+                  const y1 = edge.from.row * GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2
+                  const x2 = edge.to.lane * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2
+                  const y2 = Math.min(edge.to.row, gitLog.length - 1) * GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2 + (edge.to.row >= gitLog.length ? GRAPH_ROW_HEIGHT / 2 : 0)
+                  const color = LANE_PALETTE[(edge.merge ? edge.to.lane : edge.from.lane) % LANE_PALETTE.length]
+                  return edge.from.lane === edge.to.lane
+                    ? <line key={index} x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={1.5} />
+                    : <path key={index} d={`M ${x1} ${y1} C ${x1} ${y1 + GRAPH_ROW_HEIGHT}, ${x2} ${y2 - GRAPH_ROW_HEIGHT}, ${x2} ${y2}`} fill="none" stroke={color} strokeWidth={1.5} />
+                })}
+                {graphLayout.nodes.map(node => <circle key={node.hash} cx={node.lane * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2} cy={node.row * GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2} r={3.5} fill={LANE_PALETTE[node.lane % LANE_PALETTE.length]} />)}
+              </svg>
+              {gitLog.map(entry => <button type="button" role="listitem" key={entry.hash} className="hui-tree-row hui-commit" data-selected={selected === entry.hash || undefined} style={{ paddingLeft: graphLayout.laneCount * GRAPH_LANE_WIDTH + 8 }} title={`${entry.subject}\n${entry.author}\n${new Date(entry.timestamp * 1000).toLocaleString()}`} onClick={() => openCommit(entry.hash)}>
+                {entry.refs.map(ref => <span key={`${ref.kind}:${ref.name}`} className="hui-ref" data-kind={ref.kind} title={refTooltip(ref)}>{ref.kind === 'head' ? 'HEAD' : ref.name}</span>)}
+                <span className="hui-commit-subject">{entry.subject}</span>
+                <span className="hui-commit-meta"><b>{entry.shortHash}</b><small>{commitTime(entry.timestamp)}</small></span>
+              </button>)}
+            </div>}
         </div> : null}
         </>}
       </section>
       {selected !== null && mode !== 'terminal' ? <section className="hui-editor">
         <div className="hui-editor-tabs"><div className="hui-editor-tab"><span>{selectedName}</span><button type="button" onClick={closeFile} aria-label={t.closeFileName(selectedName ?? '')} title={t.closeFile}><X size={14} /></button></div></div>
-        <div className="hui-breadcrumbs"><div>{selected.split('/').map((part, index) => <span key={`${part}:${index}`}>{index > 0 ? <ChevronRight size={10} /> : null}{part}</span>)}</div><b>{presentation.toUpperCase()}</b></div><div className="hui-editor-surface" data-presentation={presentation}>{presentation === 'image' && previewDataUrl !== undefined ? <div className="hui-image-view"><img src={previewDataUrl} alt={selectedName ?? t.imagePreview} /><span>{selectedName}</span></div> : presentation === 'markdown' ? <MarkdownPreview content={preview} /> : presentation === 'json' ? <CodePreview content={formattedJson(preview)} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'diff' ? <CodePreview content={preview} diff /> : presentation === 'code' ? <CodePreview content={preview} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'binary' ? <div className="hui-binary-view"><strong>{t.binaryNoPreview}</strong><span>{selectedName}</span></div> : <div className="hui-text-view">{preview}</div>}</div>
+        <div className="hui-breadcrumbs"><div>{selected.split('/').map((part, index) => <span key={`${part}:${index}`}>{index > 0 ? <ChevronRight size={10} /> : null}{part}</span>)}</div>{editing ? null : editable ? <button type="button" className="hui-edit-button" onClick={startEdit}>{t.editorEdit}</button> : previewSource === 'file' && (truncated || previewBinary) ? <span className="hui-editor-hint">{truncated ? t.editorDisabledTruncated : t.editorDisabledBinary}</span> : null}<b>{presentation.toUpperCase()}</b></div><div className="hui-editor-surface" data-presentation={presentation}>{editing ? <CodeEditor path={selected} initialContent={draftContent} saving={saving} onSave={saveFile} onCancel={cancelEdit} /> : presentation === 'image' && previewDataUrl !== undefined ? <div className="hui-image-view"><img src={previewDataUrl} alt={selectedName ?? t.imagePreview} /><span>{selectedName}</span></div> : presentation === 'json' ? <CodePreview content={formattedJson(preview)} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'diff' ? <CodePreview content={preview} diff /> : presentation === 'code' ? <CodePreview content={preview} language={hljsLanguageOf(selected ?? '')} /> : presentation === 'binary' ? <div className="hui-binary-view"><strong>{t.binaryNoPreview}</strong><span>{selectedName}</span></div> : <div className="hui-text-view">{preview}</div>}</div>
+        {editorError ? <div className="hui-editor-error">{editorError}</div> : null}
       </section> : null}
     </div>
     <footer className="hui-statusbar"><span><GitBranch size={12} /> {snapshot?.gitAvailable ? t.changesCount(snapshot.changes.length) : t.notGitProject}</span><span>{snapshot?.rootName ?? t.project}</span></footer>
@@ -492,16 +692,26 @@ const FLAT_STYLES = `
 const EDITOR_STYLES = `
 .hui-editor-tab>button{display:grid;width:20px;height:20px;padding:0;place-items:center;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a93a5);font:14px/1 sans-serif;cursor:pointer}.hui-editor-tab>button:hover{background:var(--dsw-alias-interactive-bg-hover,#eef0f4);color:var(--dsw-alias-label-primary,#172033)}.hui-breadcrumbs{justify-content:space-between}.hui-breadcrumbs>div{display:flex;min-width:0;overflow:hidden}.hui-breadcrumbs>b{flex:none;margin-left:8px;color:var(--dsw-alias-label-tertiary,#8a93a5);font-size:9px;font-weight:600;letter-spacing:.4px}.hui-editor-surface{min-width:0;min-height:0;flex:1;overflow:auto;background:var(--dsw-alias-bg-base,#fff)}
 .hui-code-view{display:table;width:100%;min-width:max-content;padding:10px 0;font:12px/1.65 "SFMono-Regular",Consolas,"Liberation Mono",monospace;counter-reset:line}.hui-code-line{display:table-row;min-height:20px}.hui-code-line>span{display:table-cell;width:1%;padding:0 12px 0 10px;border-right:1px solid var(--dsw-alias-border-l2,#e4e8f0);color:var(--dsw-alias-label-tertiary,#8a93a5);text-align:right;user-select:none}.hui-code-line>code{display:table-cell;padding:0 16px;white-space:pre}.hui-code-line:hover>code{background:var(--dsw-alias-interactive-bg-hover,#eef0f4)}.hui-code-line[data-change=add]>code{background:var(--dsw-alias-bg-success-subtle,#eaf7f0);color:var(--dsw-alias-label-success,#16895a)}.hui-code-line[data-change=delete]>code{background:var(--dsw-alias-bg-error-subtle,#fceeee);color:var(--dsw-alias-label-error,#d94a4a)}.hui-code-line[data-change=hunk]>code{background:var(--dsw-alias-bg-info-subtle,#eef2ff);color:var(--dsw-alias-brand-primary,#4d6bfe)}
-.hui-markdown-view{max-width:720px;margin:0 auto;padding:28px 30px;color:var(--dsw-alias-label-primary,#172033);font-size:13px;line-height:1.7}.hui-markdown-view p{margin:4px 0}.hui-md-heading{margin:20px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--dsw-alias-border-l2,#e4e8f0);font-weight:650}.hui-md-heading[data-level="1"]{font-size:24px}.hui-md-heading[data-level="2"]{font-size:20px}.hui-md-heading[data-level="3"]{font-size:16px}.hui-md-heading[data-level="4"]{font-size:14px}.hui-md-list{display:flex;gap:9px;padding-left:8px}.hui-md-list>span{color:var(--dsw-alias-brand-primary,#4d6bfe)}.hui-markdown-view blockquote{margin:10px 0;padding:5px 12px;border-left:3px solid var(--dsw-alias-brand-primary,#4d6bfe);background:var(--dsw-alias-bg-module-platform,#fafbfc);color:var(--dsw-alias-label-secondary,#6c768a)}.hui-md-fence{margin-top:8px;padding:5px 9px;background:var(--dsw-alias-bg-module-platform,#fafbfc);color:var(--dsw-alias-label-tertiary,#8a93a5);font:10px/1.4 monospace}.hui-md-space{height:8px}
+.hui-editor-edit{display:flex;min-width:0;min-height:0;flex:1;flex-direction:column}.hui-editor-cm{display:flex;min-width:0;min-height:0;flex:1;overflow:hidden}.hui-editor-cm .cm-editor{flex:1;min-width:0}.hui-editor-actions{display:flex;flex:none;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--dsw-alias-border-l2,#e4e8f0);background:var(--dsw-alias-bg-module-platform,#fafbfc)}.hui-editor-actions button{padding:4px 14px;border:1px solid var(--dsw-alias-border-l1,#c7ccd5);border-radius:6px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#172033);font:inherit;font-size:12px;cursor:pointer}.hui-editor-actions button[data-primary]{border-color:var(--dsw-alias-brand-primary,#4d6bfe);background:var(--dsw-alias-brand-primary,#4d6bfe);color:#fff}.hui-editor-actions button:disabled{cursor:default;opacity:.6}.hui-edit-button{flex:none;margin-left:8px;padding:2px 10px;border:1px solid var(--dsw-alias-border-l1,#c7ccd5);border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary,#6c768a);font:inherit;font-size:10px;cursor:pointer}.hui-edit-button:hover{background:var(--dsw-alias-interactive-bg-hover,#eef0f4);color:var(--dsw-alias-label-primary,#172033)}.hui-editor-hint{flex:none;margin-left:8px;color:var(--dsw-alias-label-tertiary,#8a93a5);font-size:10px}.hui-editor-error{flex:none;padding:6px 12px;border-top:1px solid var(--dsw-alias-border-l2,#e4e8f0);color:var(--dsw-alias-label-error,#d94a4a);font-size:11px}.hui-notice{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l2,#e4e8f0);background:var(--dsw-alias-bg-success-subtle,#eaf7f0);color:var(--dsw-alias-label-success,#16895a);font-size:11px}.hui-notice button{display:grid;padding:2px;place-items:center;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer}
 .hui-image-view,.hui-binary-view{display:flex;min-height:100%;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;color:var(--dsw-alias-label-tertiary,#8a93a5)}.hui-image-view{background:var(--dsw-alias-bg-module-platform,#fafbfc)}.hui-image-view img{display:block;max-width:100%;max-height:calc(100vh - 180px);object-fit:contain}.hui-image-view span,.hui-binary-view span{font-size:11px}.hui-binary-view strong{color:var(--dsw-alias-label-secondary,#6c768a);font-size:13px}.hui-text-view{min-height:100%;padding:24px 28px;color:var(--dsw-alias-label-primary,#172033);font:13px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:pre-wrap;word-break:break-word}
 .hui-code-line>code .hljs-comment{color:#6a737d;font-style:italic}.hui-code-line>code .hljs-keyword,.hui-code-line>code .hljs-selector-tag,.hui-code-line>code .hljs-literal,.hui-code-line>code .hljs-doctag{color:#d73a49}.hui-code-line>code .hljs-string,.hui-code-line>code .hljs-regexp,.hui-code-line>code .hljs-template-string{color:#032f62}.hui-code-line>code .hljs-attr{color:#e36209}.hui-code-line>code .hljs-number,.hui-code-line>code .hljs-title,.hui-code-line>code .hljs-function .hljs-title,.hui-code-line>code .hljs-symbol{color:#005cc5}.hui-code-line>code .hljs-built_in,.hui-code-line>code .hljs-type,.hui-code-line>code .hljs-class .hljs-title,.hui-code-line>code .hljs-title.class_{color:#e36209}.hui-code-line>code .hljs-variable,.hui-code-line>code .hljs-template-variable,.hui-code-line>code .hljs-name,.hui-code-line>code .hljs-tag,.hui-code-line>code .hljs-attribute{color:#22863a}.hui-code-line>code .hljs-params,.hui-code-line>code .hljs-property{color:#005cc5}.hui-code-line>code .hljs-emphasis{font-style:italic}.hui-code-line>code .hljs-strong{font-weight:700}.hui-drawer ::-webkit-scrollbar{width:8px;height:8px}.hui-drawer ::-webkit-scrollbar-track{background:transparent}.hui-drawer ::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:5px;background:var(--dsw-alias-fill-secondary,#c9cdd6);background-clip:padding-box}.hui-drawer ::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-label-tertiary,#8a93a5);background-clip:padding-box}.hui-editor-tab>button{transition:color .12s ease,background .12s ease}.hui-editor-tab>button:hover{background:var(--dsw-alias-interactive-bg-hover,#eef0f4);color:var(--dsw-alias-label-error,#d94a4a)}.hui-breadcrumbs>div{color:var(--dsw-alias-label-secondary,#6c768a);font-size:10px}.hui-editor-tab>span:first-child{font-weight:500}.hui-section-title{transition:background .12s ease}.hui-section-title:hover{background:var(--dsw-alias-interactive-bg-hover,#e4e8f0)}.hui-section-title>b{letter-spacing:.5px}.hui-section-title>em{transition:background .12s ease}
+`
+
+const GRAPH_STYLES = `
+.hui-graph{position:relative}.hui-graph-edges{position:absolute;top:0;left:0;pointer-events:none}
+.hui-commit{display:flex;min-width:0;align-items:center;gap:6px}.hui-commit-subject{overflow:hidden;min-width:0;flex:1;text-overflow:ellipsis;white-space:nowrap}.hui-commit-meta{display:inline-flex;flex:none;align-items:baseline;gap:6px;color:var(--dsw-alias-label-tertiary,#8a93a5)}.hui-commit-meta>b{font-weight:600;font-variant-numeric:tabular-nums}.hui-commit-meta>small{font-size:10px}
+.hui-ref{flex:none;max-width:120px;overflow:hidden;padding:0 5px;border:1px solid var(--dsw-alias-border-l2,#e4e8f0);border-radius:4px;text-overflow:ellipsis;white-space:nowrap;font-size:9.5px;line-height:16px;color:var(--dsw-alias-label-secondary,#6c768a)}
+.hui-ref[data-kind=branch]{border-color:var(--dsw-alias-brand-primary,#4d6bfe);background:var(--dsw-alias-bg-info-subtle,#eef2ff);color:var(--dsw-alias-brand-primary,#4d6bfe)}
+.hui-ref[data-kind=remote]{border-color:var(--dsw-alias-border-l1,#c7ccd5);background:var(--dsw-alias-bg-module-platform,#fafbfc)}
+.hui-ref[data-kind=tag]{border-color:var(--dsw-alias-label-warning,#b7791f);background:var(--dsw-alias-bg-warning-subtle,#fdf3e3);color:var(--dsw-alias-label-warning,#b7791f)}
+.hui-ref[data-kind=head]{border-color:var(--dsw-alias-label-success,#16895a);background:var(--dsw-alias-bg-success-subtle,#eaf7f0);color:var(--dsw-alias-label-success,#16895a)}
 `
 
 export const inject = ['slots', 'sessions']
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     if (document.getElementById(STYLE_ID)) return
-    const style = document.createElement('style'); style.id = STYLE_ID; style.textContent = STYLES + STATUS_STYLES + FLAT_STYLES + EDITOR_STYLES; document.head.append(style)
+    const style = document.createElement('style'); style.id = STYLE_ID; style.textContent = STYLES + STATUS_STYLES + FLAT_STYLES + EDITOR_STYLES + GRAPH_STYLES; document.head.append(style)
     return () => style.remove()
   }, 'dsh-workspace: styles')
   const Summary = ({ wide }: { wide: boolean }) => <HarnessSummary wide={wide} sessions={ctx.sessions} />

@@ -10,7 +10,7 @@ export default defineConfig({
   dts: false,
   sourcemap: false,
   external: ['react', 'react/jsx-runtime'],
-  noExternal: [/^highlight\.js/, /^lucide-react/, /^@xterm\//, /^react-icons/],
+  noExternal: [/^highlight\.js/, /^lucide-react/, /^@xterm\//, /^react-icons/, /^codemirror$/, /^@codemirror\//, /^@lezer\//],
   alias: { 'lucide-react': 'lucide-react/dist/esm/lucide-react.mjs' },
   outputOptions: {
     entryFileNames: 'client.js',

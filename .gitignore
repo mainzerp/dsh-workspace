@@ -6,3 +6,7 @@ coverage/
 reasonix.toml
 .vscode/
 dist/
+# ephemeral subagent working files
+docs/SubAgent/
+# local agent instructions
+AGENTS.md

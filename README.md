@@ -7,7 +7,7 @@
 [![Stars](https://img.shields.io/github/stars/mainzerp/dsh-workspace?style=flat-square)](https://github.com/mainzerp/dsh-workspace)
 [![License](https://img.shields.io/github/license/mainzerp/dsh-workspace?style=flat-square)](https://github.com/mainzerp/dsh-workspace)
 
-> A drop-in UI enhancement for DeepSeek Harness (DSH): a subtle USD balance with peak/off-peak indicator in the sidebar, a project file tree with previews, Git changes & history, and a built-in terminal — no extra config.
+> A drop-in UI enhancement for DeepSeek Harness (DSH): a subtle USD balance with peak/off-peak indicator in the sidebar, a project file tree with previews, in-place editing and uploads, Git changes & history, and a built-in terminal — no extra config.
 
 [Features](#features) · [Screenshots](#screenshots) · [Differences from upstream](#differences-from-upstream) · [Install](#install) · [Configuration](#configuration) · [FAQ](#faq) · [Known limitations](#known-limitations) · [License](#license)
 
@@ -28,8 +28,9 @@
 
 **Project workspace panel**
 
-- A right-side panel previews the current session's project: file tree with type-aware icons, Git working-tree changes, per-file diff, and commit history
-- Read-only and strictly confined to `projectRoot`; path traversal and out-of-root symlinks are rejected
+- A right-side panel previews the current session's project: file tree with type-aware icons, Git working-tree changes, per-file diff, and commit history as an interactive git graph (all branches, branch/tag badges, click a commit for its diff)
+- Text files can be edited in place (CodeMirror editor) and files can be uploaded into the project root; overwriting an existing upload requires confirmation
+- Strictly confined to `projectRoot`; path traversal and out-of-root symlinks are rejected, writes are atomic, and files larger than `projectMaxFileBytes` cannot be saved
 - Skips `.git`, `node_modules`, `dist`, `lib`, `coverage`, `.next`, `.cache`
 - Built-in terminal for quick command execution in the project
 
@@ -41,6 +42,7 @@
 **Privacy by default**
 
 - All endpoints are loopback-only unless you opt in with `allowRemote: true`
+- With `allowRemote: true`, remote clients additionally gain arbitrary file read/write within `projectRoot` (on top of the terminal) — enable it only behind proper access control
 - API keys are resolved through Harness `ctx.credentials` and never exposed to the browser
 
 ## Differences from upstream
@@ -86,7 +88,7 @@ The plugin works with zero configuration. The following options can be set in th
 | `timezoneOffsetMinutes` | `0` | Minutes east of UTC used for the "today" boundary |
 | `peakWindows` | `[[540, 720], [840, 1080]]` | Peak billing windows in minutes (Beijing time) |
 | `projectRoot` | — | Absolute project root to preview; defaults to the session working directory |
-| `allowRemote` | `false` | Allow non-loopback access to the plugin endpoints |
+| `allowRemote` | `false` | Allow non-loopback access to the plugin endpoints. Warning: also exposes remote file write within `projectRoot` and the terminal. The loopback check trusts `req.socket.remoteAddress`, so it cannot be relied on behind a reverse proxy |
 
 ### Troubleshooting
 
@@ -110,12 +112,13 @@ A: The balance turns red when it drops to $2 or below (¥15 for CNY accounts) as
 
 **Can I access it from my phone or another device?**
 
-A: Project data is loopback-only by default; other browsers get a 403. If you really need it, set `allowRemote: true` and make sure the access is secured.
+A: Project data is loopback-only by default; other browsers get a 403. If you really need it, set `allowRemote: true` — but keep in mind this also exposes file editing, uploads, and the terminal to remote clients, so make sure the access is secured.
 
 ## Known limitations
 
 - The peak/off-peak indicator is display-only; it mirrors DeepSeek's billing schedule and does not affect API calls
-- The project API is read-only and loopback-only by default; no write operations
+- File editing is text-only and capped at `projectMaxFileBytes` (default 200 KB, max 2 MB); binary files and files larger than the limit cannot be edited
+- Uploads always land in the project root (basename only, no nested paths) and replace existing files only after confirmation
 - Depends on the `node-pty` native module; see Troubleshooting if platform builds fail
 
 ## License
