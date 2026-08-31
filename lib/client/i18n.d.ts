@@ -74,5 +74,7 @@ declare const en: {
 export type Strings = typeof en;
 /** Active UI strings. */
 export declare const t: Strings;
+/** Switches the active strings in place; call before the UI first renders. */
+export declare function setLanguage(option: 'auto' | 'de' | 'en'): void;
 export {};
 //# sourceMappingURL=i18n.d.ts.map

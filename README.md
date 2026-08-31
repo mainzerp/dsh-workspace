@@ -89,6 +89,7 @@ The plugin works with zero configuration. The following options can be set in th
 | `peakWindows` | `[[540, 720], [840, 1080]]` | Peak billing windows in minutes (Beijing time) |
 | `projectRoot` | — | Absolute project root to preview; defaults to the session working directory |
 | `allowRemote` | `false` | Allow non-loopback access to the plugin endpoints. Warning: also exposes remote file write within `projectRoot` and the terminal. The loopback check trusts `req.socket.remoteAddress`, so it cannot be relied on behind a reverse proxy |
+| `language` | `auto` | UI language: `auto` (browser detection), `de`, or `en` |
 
 ### Troubleshooting
 

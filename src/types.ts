@@ -122,3 +122,6 @@ export interface UsageSnapshot {
     peakWindows: readonly (readonly [number, number])[]
   }
 }
+
+/** Client-relevant plugin configuration served by GET /api/v1/dsh-workspace/config. */
+export interface WorkspaceClientConfig { language: 'auto' | 'de' | 'en' }

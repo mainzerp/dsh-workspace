@@ -12,3 +12,5 @@
         projectMaxEntries: 2000
         projectMaxFileBytes: 200000
         allowRemote: false
+        # UI language: auto (browser detection), de, or en.
+        language: auto

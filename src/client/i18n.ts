@@ -143,12 +143,20 @@ const de: Strings = {
 
 const DICTIONARIES: Readonly<Record<string, Strings>> = { en, de }
 
+/** @returns the browser primary language subtag, 'en' outside a browser. */
+function primaryLanguage(): string {
+  return typeof navigator === 'undefined' ? 'en' : navigator.language.toLowerCase().split('-')[0] ?? 'en'
+}
+
 /** @returns the dictionary matching the browser locale, English as default. */
 function detect(): Strings {
-  const language = typeof navigator === 'undefined' ? 'en' : navigator.language.toLowerCase()
-  const primary = language.split('-')[0] ?? 'en'
-  return DICTIONARIES[primary] ?? en
+  return DICTIONARIES[primaryLanguage()] ?? en
 }
 
 /** Active UI strings. */
 export const t: Strings = detect()
+
+/** Switches the active strings in place; call before the UI first renders. */
+export function setLanguage(option: 'auto' | 'de' | 'en'): void {
+  Object.assign(t, DICTIONARIES[option === 'auto' ? primaryLanguage() : option] ?? en)
+}

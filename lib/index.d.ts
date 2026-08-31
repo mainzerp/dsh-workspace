@@ -15,6 +15,7 @@ export interface Config {
     projectMaxFileBytes?: number;
     shellPath?: string;
     allowRemote?: boolean;
+    language?: 'auto' | 'de' | 'en';
 }
 /** Loader-time configuration validation and defaults. */
 export declare const Config: z<Config>;

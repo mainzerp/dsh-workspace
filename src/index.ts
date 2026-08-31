@@ -13,6 +13,7 @@ import { aggregateToday } from './aggregate.js'
 import { fetchBalance } from './balance.js'
 import { ProjectBrowser } from './project-browser.js'
 import { trafficPeriodAt } from './schedule.js'
+import type { WorkspaceClientConfig } from './types.js'
 
 export type * from './types.js'
 
@@ -30,6 +31,7 @@ export interface Config {
   projectMaxFileBytes?: number
   shellPath?: string
   allowRemote?: boolean
+  language?: 'auto' | 'de' | 'en'
 }
 
 /** Loader-time configuration validation and defaults. */
@@ -46,6 +48,7 @@ export const Config: z<Config> = z.object({
   projectMaxFileBytes: z.number().step(1).min(1_024).max(2_000_000).default(200_000),
   shellPath: z.string().default('bash'),
   allowRemote: z.boolean().default(false),
+  language: z.union([z.const('auto'), z.const('de'), z.const('en')]).default('auto'),
 })
 
 export const name = 'dsh-workspace'
@@ -124,6 +127,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const peakWindows: [number, number][] = (config.peakWindows ?? [[540, 720], [840, 1_080]]).map(pair => [pair[0], pair[1]] as [number, number])
   const maxEntries = config.projectMaxEntries ?? 2_000
   const maxFileBytes = config.projectMaxFileBytes ?? 200_000
+  const language = config.language ?? 'auto'
   try { const url = new URL(baseUrl); if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error() } catch { throw new Error('dsh-workspace: baseUrl must be an absolute HTTP(S) URL') }
   if (!Number.isInteger(timezoneOffsetMinutes) || timezoneOffsetMinutes < -720 || timezoneOffsetMinutes > 840) throw new Error('dsh-workspace: timezoneOffsetMinutes must be an integer from -720 through 840')
   if (!Number.isInteger(balanceTimeoutMs) || balanceTimeoutMs < 1 || balanceTimeoutMs > 60_000) throw new Error('dsh-workspace: balanceTimeoutMs must be an integer from 1 through 60000')
@@ -137,6 +141,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
   if (!Number.isInteger(maxEntries) || maxEntries < 100 || maxEntries > 20_000) throw new Error('dsh-workspace: projectMaxEntries must be an integer from 100 through 20000')
   if (!Number.isInteger(maxFileBytes) || maxFileBytes < 1_024 || maxFileBytes > 2_000_000) throw new Error('dsh-workspace: projectMaxFileBytes must be an integer from 1024 through 2000000')
+  if (language !== 'auto' && language !== 'de' && language !== 'en') throw new Error("dsh-workspace: language must be 'auto', 'de', or 'en'")
   const browsers = new Map<string, Promise<ProjectBrowser>>()
   const getBrowser = (root: string): Promise<ProjectBrowser> => {
     let browser = browsers.get(root)
@@ -222,6 +227,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     return project.logs(url.searchParams.get('path') ?? undefined, Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 200) : 50)
   })
   register('/api/v1/dsh-workspace/commit', (project, url) => project.show(url.searchParams.get('hash') ?? ''))
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact', path: '/api/v1/dsh-workspace/config',
+    handler(req, res) {
+      const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0 ? req.headers['x-request-id'] : randomUUID()
+      if (!requireGet(req, res, requestId, 'The client configuration')) return
+      sendJson(res, 200, { language } satisfies WorkspaceClientConfig, requestId)
+    },
+  }))
 
   const invalidBody = (message: string): Error => Object.assign(new Error(message), { code: 'INVALID_BODY' })
   const registerWrite = (path: string, resource: string, bodyLimit: number, failureReason: string, write: (project: ProjectBrowser, body: Record<string, unknown>) => Promise<unknown>): void => {

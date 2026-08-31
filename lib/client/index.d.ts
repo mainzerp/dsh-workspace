@@ -24,6 +24,6 @@ interface ClientContext {
     effect(callback: () => void | (() => void), label?: string): unknown;
 }
 export declare const inject: string[];
-export declare function apply(ctx: ClientContext): void;
+export declare function apply(ctx: ClientContext): Promise<void>;
 export {};
 //# sourceMappingURL=index.d.ts.map
