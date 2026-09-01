@@ -59,8 +59,13 @@ This fork diverges from [deepseek-dsh/dsh-workspace](https://github.com/deepseek
 
 ### Requirements
 
-- DeepSeek Harness installed and `dsh web` running
+- DeepSeek Harness (DSH) **0.1.2-alpha.3** or newer installed and `dsh web` running — this plugin release (1.0.0) is NOT compatible with DSH 0.1.1.x
 - Node.js >= 22 when installing from the repository
+
+| Plugin version | Required DSH version |
+| --- | --- |
+| 1.0.0+ | 0.1.2-alpha.3+ |
+| 0.4.x | 0.1.1-rc.2+ |
 
 ### One-line install
 
