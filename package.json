@@ -1,6 +1,6 @@
 {
   "name": "@mainzerp/dsh-workspace",
-  "version": "0.4.2",
+  "version": "1.0.0",
   "description": "DSH web UI enhancement: project file tree, Git changes & history, terminal, and a subtle USD balance/cost summary in the sidebar",
   "type": "module",
   "main": "lib/index.js",
@@ -29,7 +29,8 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-sidebar"
       ],
       "platform": "web"
@@ -69,18 +70,18 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.0",
-    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session-persistence": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.2-rc.1",
     "react": "^18.2.0 || ^19.0.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.0",
-    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-session-persistence": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.2-rc.1",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.0",
     "react": "^18.2.0",
