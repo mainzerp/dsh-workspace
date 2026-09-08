@@ -70,6 +70,8 @@ const en = {
   peak: 'Peak',
   offPeakBillingPeriod: 'Off-peak billing period',
   peakBillingPeriod: 'Peak billing period',
+  collapseDrawer: 'Collapse project panel',
+  expandDrawer: 'Expand project panel',
 }
 
 /** Shape of a complete translation. */
@@ -139,6 +141,8 @@ const de: Strings = {
   peak: 'Hauptzeit',
   offPeakBillingPeriod: 'Abrechnungszeitraum Nebenzeit',
   peakBillingPeriod: 'Abrechnungszeitraum Hauptzeit',
+  collapseDrawer: 'Projektbereich einklappen',
+  expandDrawer: 'Projektbereich ausklappen',
 }
 
 const DICTIONARIES: Readonly<Record<string, Strings>> = { en, de }

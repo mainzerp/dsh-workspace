@@ -12,7 +12,7 @@ import { html } from '@codemirror/lang-html'
 import { json } from '@codemirror/lang-json'
 import { rust } from '@codemirror/lang-rust'
 import { markdown } from '@codemirror/lang-markdown'
-import { AtSign, Blocks, ChevronDown, ChevronRight, Database, Eraser, FileArchive, FileAudio, FileCode, FileImage, FileSpreadsheet, FileText, FileVideo, Folder, FolderOpen, FolderTree, GitBranch, RefreshCw, Terminal, Upload, X } from 'lucide-react'
+import { AtSign, Blocks, ChevronDown, ChevronRight, Database, Eraser, FileArchive, FileAudio, FileCode, FileImage, FileSpreadsheet, FileText, FileVideo, Folder, FolderOpen, FolderTree, GitBranch, PanelRightClose, PanelRightOpen, RefreshCw, Terminal, Upload, X } from 'lucide-react'
 import { SiC, SiCplusplus, SiCss, SiGnubash, SiGo, SiHtml5, SiJavascript, SiJson, SiMarkdown, SiOpenjdk, SiPython, SiRust, SiSqlite, SiSvelte, SiTypescript, SiVuedotjs, SiYaml } from 'react-icons/si'
 import type { LanguageFn } from 'highlight.js'
 import hljs from 'highlight.js/lib/core'
@@ -36,6 +36,7 @@ import yamlLang from 'highlight.js/lib/languages/yaml'
 import type { GitCommitPreview, GitDiffPreview, GitLogEntry, GitLogPreview, GitLogRef, ProjectFilePreview, ProjectFileWriteResult, ProjectSnapshot, UsageSnapshot, WorkspaceClientConfig } from '../types.js'
 import { setLanguage, t } from './i18n.js'
 import { computeGraphLayout, GRAPH_LANE_WIDTH, GRAPH_ROW_HEIGHT, LANE_PALETTE } from './graph.js'
+import { clampDrawerWidth, readDrawerCollapsed, readDrawerWidth, resolveDrawerWidth, writeDrawerCollapsed, writeDrawerWidth } from './drawer.js'
 
 const HIGHLIGHT_LANGUAGES: ReadonlyArray<readonly [string, LanguageFn]> = [
   ['bash', bashLang], ['c', cLang], ['cpp', cppLang], ['css', cssLang], ['go', goLang],
@@ -367,25 +368,35 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
   const [historyOpen, setHistoryOpen] = useState(false)
   const [gitLog, setGitLog] = useState<GitLogEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [drawerWidth, setDrawerWidth] = useState<number | null>(null)
-  const effectiveWidth = drawerWidth ?? (selected === null ? 400 : null)
+  const [drawerWidth, setDrawerWidth] = useState<number | null>(() => (typeof window === 'undefined' ? null : readDrawerWidth(window.innerWidth)))
+  const [collapsed, setCollapsed] = useState<boolean>(readDrawerCollapsed)
+  const effectiveWidth = resolveDrawerWidth(collapsed, drawerWidth, selected)
   useEffect(() => {
     const root = document.documentElement
     if (effectiveWidth === null) root.style.removeProperty('--hui-drawer-width')
     else root.style.setProperty('--hui-drawer-width', `${effectiveWidth}px`)
     return () => { root.style.removeProperty('--hui-drawer-width') }
   }, [effectiveWidth])
+  useEffect(() => {
+    const onResize = () => setDrawerWidth(current => current === null ? null : clampDrawerWidth(current, window.innerWidth))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const startResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
     const drawer = event.currentTarget.parentElement
     const startX = event.clientX
     const startWidth = drawer === null ? 600 : drawer.getBoundingClientRect().width
+    let latestWidth: number | null = null
     const onMove = (move: PointerEvent) => {
       const next = startWidth - (move.clientX - startX)
-      setDrawerWidth(Math.min(Math.max(next, 320), window.innerWidth - 32))
+      const clamped = clampDrawerWidth(next, window.innerWidth)
+      latestWidth = clamped
+      setDrawerWidth(clamped)
     }
     const onUp = () => {
+      if (latestWidth !== null) writeDrawerWidth(latestWidth)
       document.body.style.cursor = ''
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
@@ -393,7 +404,7 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     document.body.style.cursor = 'col-resize'
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-  }, [selected])
+  }, [])
   const refresh = useCallback(() => {
     setError(null)
     const params = new URLSearchParams()
@@ -577,13 +588,28 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
     if (file === undefined) return
     uploadFile(file, false).catch(reason => setError(t.uploadFailed(reason instanceof Error ? reason.message : String(reason))))
   }, [uploadFile])
-  return <aside className="hui-drawer" aria-label={t.projectPreview} style={effectiveWidth === null ? undefined : { width: effectiveWidth }}>
-    <div className="hui-resizer" aria-hidden="true" onPointerDown={startResize} />
-    <header className="hui-titlebar"><div><span className="hui-vscode-mark"><Blocks size={14} /></span><span title={snapshot?.rootPath}>{snapshot?.rootPath ?? t.loadingCurrentProject}</span></div></header>
+  const applyCollapsed = useCallback((next: boolean) => {
+    writeDrawerCollapsed(next)
+    setCollapsed(next)
+  }, [])
+  const expandToView = useCallback((next: 'files' | 'changes' | 'terminal') => {
+    setMode(next)
+    writeDrawerCollapsed(false)
+    setCollapsed(false)
+  }, [])
+  return <aside className="hui-drawer" data-collapsed={collapsed || undefined} aria-label={t.projectPreview} style={effectiveWidth === null ? undefined : { width: effectiveWidth }}>
+    {collapsed ? null : <div className="hui-resizer" aria-hidden="true" onPointerDown={startResize} />}
+    {collapsed ? <nav className="hui-activity hui-rail" aria-label={t.projectViews}>
+      <button type="button" aria-label={t.explorer} title={t.explorer} onClick={() => expandToView('files')}><FolderTree size={20} /></button>
+      <button type="button" aria-label={t.sourceControl} title={t.sourceControl} onClick={() => expandToView('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button>
+      <button type="button" aria-label={t.terminal} title={t.terminal} onClick={() => expandToView('terminal')}><Terminal size={20} /></button>
+      <button type="button" className="hui-rail-toggle" aria-label={t.expandDrawer} title={t.expandDrawer} onClick={() => applyCollapsed(false)}><PanelRightOpen size={20} /></button>
+    </nav> : null}
+    <header className="hui-titlebar"><div><span className="hui-vscode-mark"><Blocks size={14} /></span><span title={snapshot?.rootPath}>{snapshot?.rootPath ?? t.loadingCurrentProject}</span></div><button type="button" aria-label={t.collapseDrawer} title={t.collapseDrawer} onClick={() => applyCollapsed(true)}><PanelRightClose size={14} /></button></header>
     {error ? <div className="hui-error">{error}<button type="button" onClick={() => setError(null)} aria-label={t.dismiss} title={t.dismiss}><X size={12} /></button></div> : null}
     {notice ? <div className="hui-notice">{notice}<button type="button" onClick={() => setNotice(null)} aria-label={t.dismiss} title={t.dismiss}><X size={12} /></button></div> : null}
     <div className="hui-workbench" data-preview={(selected !== null && mode !== 'terminal') || undefined}>
-      <nav className="hui-activity" aria-label={t.projectViews}><button type="button" aria-label={t.explorer} title={t.explorer} data-active={mode === 'files' || undefined} onClick={() => setMode('files')}><FolderTree size={20} /></button><button type="button" aria-label={t.sourceControl} title={t.sourceControl} data-active={mode === 'changes' || undefined} onClick={() => setMode('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button></nav>
+      <nav className="hui-activity" aria-label={t.projectViews}><button type="button" aria-label={t.explorer} title={t.explorer} data-active={mode === 'files' || undefined} onClick={() => setMode('files')}><FolderTree size={20} /></button><button type="button" aria-label={t.sourceControl} title={t.sourceControl} data-active={mode === 'changes' || undefined} onClick={() => setMode('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button><button type="button" aria-label={t.terminal} title={t.terminal} data-active={mode === 'terminal' || undefined} onClick={() => setMode('terminal')}><Terminal size={20} /></button></nav>
       <section className="hui-explorer">
         <header><strong>{mode === 'files' ? t.explorer : mode === 'changes' ? t.sourceControl : t.terminal}</strong>{mode !== 'terminal' ? <><button type="button" onClick={() => fileInputRef.current?.click()} aria-label={t.upload} title={t.upload}><Upload size={15} /></button><button type="button" onClick={refresh} aria-label={t.refresh} title={t.refresh}><RefreshCw size={15} /></button></> : null}</header>
         {mode !== 'terminal' ? <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={onUploadPick} /> : null}
@@ -689,6 +715,7 @@ const BASE_STYLES = `
 .hui-tree-row{display:flex;width:100%;height:23px;align-items:center;gap:4px;padding:0 8px;overflow:hidden;border:0;background:transparent;color:inherit;text-align:left;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:default}.hui-tree-open{display:flex;flex:1;min-width:0;align-items:center;gap:4px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:default}.hui-tree-open>svg{flex:none;color:var(--dsw-alias-label-secondary,#6c768a)}.hui-tree-open>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hui-tree-at{flex:none;display:none;width:18px;height:18px;padding:0;place-items:center;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-success,#16895a);cursor:pointer}.hui-tree-row:hover .hui-tree-at,.hui-tree-row[data-selected] .hui-tree-at{display:grid}.hui-tree-at:hover{background:var(--dsw-alias-interactive-bg-hover,#e8e8e8);color:var(--dsw-alias-label-success,#16895a)}.hui-tree-row:hover{background:var(--dsw-alias-interactive-bg-hover,#e8e8e8)}.hui-tree-row[data-selected]{background:#007acc26;outline:1px solid #007acc55;outline-offset:-1px}.hui-tree-row>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hui-tree-row>svg{flex:none;color:var(--dsw-alias-label-secondary,#6c768a)}.hui-tree-row>.hui-folder-icon{color:var(--dsw-alias-label-warning,#dcb67a)}.hui-chevron{display:flex;width:14px;flex:none;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary,#666)}.hui-change{padding-left:12px;cursor:pointer}.hui-change>span:first-child{overflow:hidden;min-width:0;text-overflow:ellipsis;white-space:nowrap}.hui-change>small{overflow:hidden;flex:1;color:var(--dsw-alias-label-tertiary,#858585);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.hui-change>b{margin-left:auto;color:#d19a66;font-size:10px}.hui-change>b[data-status^=M]{color:#d7ba7d}.hui-change>b[data-status^=A],.hui-change>b[data-status^=?]{color:#73c991}.hui-change>b[data-status^=D]{color:#f48771}.hui-tree>p,.hui-empty-small{padding:12px 16px;color:var(--dsw-alias-label-tertiary,#858585);font-size:11px;line-height:1.5}
 .hui-editor{display:flex;min-width:0;min-height:0;flex-direction:column;background:var(--dsw-alias-bg-module-platform,#fff)}.hui-editor-tabs{height:35px;flex:none;border-bottom:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-base,#f3f3f3)}.hui-editor-tab{display:flex;width:min(190px,80%);height:35px;align-items:center;gap:5px;padding:0 10px;border-top:1px solid #007acc;border-right:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-module-platform,#fff);font-size:11px}.hui-breadcrumbs{display:flex;height:26px;align-items:center;gap:3px;padding:0 10px;overflow:hidden;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);color:var(--dsw-alias-label-secondary,#666);font-size:10px;white-space:nowrap}.hui-breadcrumbs span{display:flex;align-items:center;gap:3px}.hui-breadcrumbs svg{flex:none;color:var(--dsw-alias-label-tertiary,#999)}.hui-statusbar{display:flex;height:22px;flex:none;align-items:center;justify-content:space-between;padding:0 9px;background:#007acc;color:#fff;font-size:10px}.hui-error{position:absolute;z-index:2;top:40px;right:0;left:44px;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:7px 10px;background:#b42318;color:#fff;font-size:11px}.hui-error>button{display:grid;width:18px;height:18px;flex:none;place-items:center;padding:0;border:0;border-radius:4px;background:transparent;color:#fff;cursor:pointer}.hui-error>button:hover{background:rgb(255 255 255/.2)}
 .hui-change>b[data-status="??"]{color:#73c991}@media(min-width:1100px){div:has(>[data-shell-overlay]):has(.hui-drawer){box-sizing:border-box;padding-right:var(--hui-drawer-width,clamp(600px,46vw,780px))}}@media(max-width:1099px){.hui-drawer{width:min(100vw,780px)}}@media(max-width:650px){.hui-workbench{grid-template-columns:42px minmax(0,1fr)}.hui-workbench[data-preview]{grid-template-columns:42px 210px minmax(280px,1fr)}.hui-drawer{overflow:auto}.hui-workbench{min-width:620px}}
+.hui-drawer{box-sizing:border-box}.hui-rail{display:flex;flex:1;flex-direction:column;align-items:stretch;border-right:0}.hui-drawer[data-collapsed]>:not(.hui-rail){display:none}.hui-drawer[data-collapsed] .hui-rail .hui-rail-toggle{margin-top:auto;border-top:1px solid var(--dsw-alias-border-l2,#dedede)}
 `
 
 const FLAT_STYLES = `

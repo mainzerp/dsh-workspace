@@ -69,6 +69,8 @@ declare const en: {
     peak: string;
     offPeakBillingPeriod: string;
     peakBillingPeriod: string;
+    collapseDrawer: string;
+    expandDrawer: string;
 };
 /** Shape of a complete translation. */
 export type Strings = typeof en;

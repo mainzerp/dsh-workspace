@@ -29,10 +29,11 @@
 **Project workspace panel**
 
 - A right-side panel previews the current session's project: file tree with type-aware icons, Git working-tree changes, per-file diff, and commit history as an interactive git graph (all branches, branch/tag badges, click a commit for its diff)
+- The panel collapses to a 44px icon rail on the right edge (Explorer, Source Control, Terminal); clicking a rail icon expands the panel and switches to that view. The collapsed state and the dragged width persist across reloads in `localStorage`
 - Text files can be edited in place (CodeMirror editor) and files can be uploaded into the project root; overwriting an existing upload requires confirmation
 - Strictly confined to `projectRoot`; path traversal and out-of-root symlinks are rejected, writes are atomic, and files larger than `projectMaxFileBytes` cannot be saved
 - Skips `.git`, `node_modules`, `dist`, `lib`, `coverage`, `.next`, `.cache`
-- Built-in terminal for quick command execution in the project
+- Built-in terminal for quick command execution in the project (Terminal activity button)
 
 **Internationalized**
 
@@ -59,7 +60,7 @@ This fork diverges from [deepseek-dsh/dsh-workspace](https://github.com/deepseek
 
 ### Requirements
 
-- DeepSeek Harness (DSH) **0.1.2-rc.1** or newer installed and `dsh web` running — this plugin release (1.0.0) is NOT compatible with DSH 0.1.1.x
+- DeepSeek Harness (DSH) **0.1.2-rc.1** or newer installed and `dsh web` running — this plugin release (1.1.0) is NOT compatible with DSH 0.1.1.x
 - Node.js >= 22 when installing from the repository
 
 | Plugin version | Required DSH version |
@@ -126,6 +127,8 @@ A: Project data is loopback-only by default; other browsers get a 403. If you re
 - File editing is text-only and capped at `projectMaxFileBytes` (default 200 KB, max 2 MB); binary files and files larger than the limit cannot be edited
 - Uploads always land in the project root (basename only, no nested paths) and replace existing files only after confirmation
 - Depends on the `node-pty` native module; see Troubleshooting if platform builds fail
+- The collapsed state and the panel width are stored in the browser's `localStorage`; clearing site data resets the panel to expanded at its default width
+- The panel reserves space in the chat column only at viewport widths of 1100px or more; below that it overlays the content
 
 ## License
 
