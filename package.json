@@ -1,6 +1,6 @@
 {
   "name": "dsh-workspace",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "DSH web UI enhancement: project file tree, Git changes & history, terminal, and a subtle USD balance/cost summary in the sidebar",
   "type": "module",
   "main": "lib/index.js",
