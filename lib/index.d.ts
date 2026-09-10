@@ -10,6 +10,7 @@ export interface Config {
     balanceTimeoutMs?: number;
     inspectConcurrency?: number;
     peakWindows?: number[][];
+    peakWeekdays?: number[];
     projectRoot?: string;
     projectMaxEntries?: number;
     projectMaxFileBytes?: number;

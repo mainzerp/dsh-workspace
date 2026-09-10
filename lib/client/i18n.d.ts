@@ -69,6 +69,7 @@ declare const en: {
     peak: string;
     offPeakBillingPeriod: string;
     peakBillingPeriod: string;
+    dayBarSchedule: string;
     collapseDrawer: string;
     expandDrawer: string;
 };

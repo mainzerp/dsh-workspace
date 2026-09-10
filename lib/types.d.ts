@@ -119,6 +119,7 @@ export interface UsageSnapshot {
     trafficSchedule: {
         timezoneOffsetMinutes: number;
         peakWindows: readonly (readonly [number, number])[];
+        peakWeekdays: readonly number[];
     };
 }
 /** Client-relevant plugin configuration served by GET /api/v1/dsh-workspace/config. */
