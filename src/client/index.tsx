@@ -700,7 +700,7 @@ function HarnessSummary({ wide, sessions }: { wide: boolean; sessions: SessionsS
   const balanceTone = Number.isFinite(balanceAmount) && balanceAmount <= lowThreshold ? 'danger' : 'safe'
   const period = snapshot?.ratePeriod ?? 'idle'
   const schedule = snapshot?.trafficSchedule
-  const scheduleBar = schedule === undefined ? null : computeScheduleBar(Date.now(), schedule.timezoneOffsetMinutes, schedule.peakWindows, schedule.peakWeekdays)
+  const scheduleBar = schedule === undefined ? null : computeScheduleBar(Date.now(), schedule.scheduleTimezoneOffsetMinutes, schedule.peakWindows, schedule.peakWeekdays)
   return <div className={`hui-summary${wide ? '' : ' rail'}`}>
     <div className="hui-summary-main" aria-label={t.balanceStatus} title={snapshot?.balance.error}>{wide ? <span className="hui-content"><span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i />{period === 'idle' ? t.offPeak : t.peak}</span><span className="hui-balance-line"><b data-tone={balanceTone}>{balanceValue}</b></span></span> : <span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i /></span>}{wide && scheduleBar !== null ? <div className="hui-daybar" role="img" aria-label={t.scheduleBarHint} title={t.scheduleBarHint}>{scheduleBar.segments.map((segment, index) => <span key={index} className="hui-daybar-peak" style={{ left: `${segment.start * 100}%`, width: `${(segment.end - segment.start) * 100}%` }} />)}<span className="hui-daybar-marker" style={{ left: `${scheduleBar.markerFraction * 100}%` }} /></div> : null}</div>
     <ProjectDrawer sessionId={sessionId} cwd={cwd} />

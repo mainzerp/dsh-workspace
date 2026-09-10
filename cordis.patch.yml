@@ -5,8 +5,12 @@
       config:
         baseUrl: https://api.deepseek.com
         apiKeyEnv: DEEPSEEK_API_KEY
-        # Local timezone for the "today" boundary: Europe/Berlin (UTC+2 CEST / UTC+1 CET).
+        # Local timezone for the usage "today" boundary: Europe/Berlin (UTC+2 CEST / UTC+1 CET).
         timezoneOffsetMinutes: 120
+        # Billing schedule timezone for peakWindows/peakWeekdays. 0 = UTC, the documented rule
+        # (peak 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday) - independent of the
+        # local day boundary above, so daylight saving never has to be maintained here.
+        scheduleTimezoneOffsetMinutes: 0
         balanceTimeoutMs: 5000
         inspectConcurrency: 8
         projectMaxEntries: 2000

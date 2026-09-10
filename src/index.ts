@@ -25,6 +25,7 @@ export interface Config {
   apiKey?: string
   apiKeyEnv?: string
   timezoneOffsetMinutes?: number
+  scheduleTimezoneOffsetMinutes?: number
   balanceTimeoutMs?: number
   inspectConcurrency?: number
   peakWindows?: number[][]
@@ -47,6 +48,7 @@ export const Config: z<Config> = z.object({
   apiKey: z.string(),
   apiKeyEnv: z.string().default('DEEPSEEK_API_KEY'),
   timezoneOffsetMinutes: z.number().step(1).min(-720).max(840).default(0),
+  scheduleTimezoneOffsetMinutes: z.number().step(1).min(-720).max(840).default(0),
   balanceTimeoutMs: z.number().step(1).min(1).max(60_000).default(5_000),
   inspectConcurrency: z.number().step(1).min(1).max(64).default(8),
   peakWindows: z.array(z.array(z.number().step(1).min(0).max(1_440))).default(PEAK_WINDOWS_DEFAULT),
@@ -130,6 +132,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const baseUrl = config.baseUrl ?? 'https://api.deepseek.com'
   const apiKeyRef = credentialRef(config.apiKeyEnv ?? 'DEEPSEEK_API_KEY')
   const timezoneOffsetMinutes = config.timezoneOffsetMinutes ?? 0
+  const scheduleTimezoneOffsetMinutes = config.scheduleTimezoneOffsetMinutes ?? 0
   const balanceTimeoutMs = config.balanceTimeoutMs ?? 5_000
   const inspectConcurrency = config.inspectConcurrency ?? 8
   const peakWindows: [number, number][] = (config.peakWindows ?? PEAK_WINDOWS_DEFAULT).map(pair => [pair[0], pair[1]] as [number, number])
@@ -139,6 +142,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const language = config.language ?? 'auto'
   try { const url = new URL(baseUrl); if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error() } catch { throw new Error('dsh-workspace: baseUrl must be an absolute HTTP(S) URL') }
   if (!Number.isInteger(timezoneOffsetMinutes) || timezoneOffsetMinutes < -720 || timezoneOffsetMinutes > 840) throw new Error('dsh-workspace: timezoneOffsetMinutes must be an integer from -720 through 840')
+  if (!Number.isInteger(scheduleTimezoneOffsetMinutes) || scheduleTimezoneOffsetMinutes < -720 || scheduleTimezoneOffsetMinutes > 840) throw new Error('dsh-workspace: scheduleTimezoneOffsetMinutes must be an integer from -720 through 840')
   if (!Number.isInteger(balanceTimeoutMs) || balanceTimeoutMs < 1 || balanceTimeoutMs > 60_000) throw new Error('dsh-workspace: balanceTimeoutMs must be an integer from 1 through 60000')
   if (!Number.isInteger(inspectConcurrency) || inspectConcurrency < 1 || inspectConcurrency > 64) throw new Error('dsh-workspace: inspectConcurrency must be an integer from 1 through 64')
   let peakWindowJson = ''
@@ -332,8 +336,8 @@ export function apply(ctx: Context, config: Config = {}): void {
           generatedAt: Math.floor(now / 1000),
           usage: { ...usage, startTime: Math.floor(usage.startTime / 1000), endTime: Math.floor(usage.endTime / 1000) },
           balance,
-          ratePeriod: trafficPeriodAt(now, timezoneOffsetMinutes, peakWindows, peakWeekdays),
-          trafficSchedule: { timezoneOffsetMinutes, peakWindows, peakWeekdays },
+          ratePeriod: trafficPeriodAt(now, scheduleTimezoneOffsetMinutes, peakWindows, peakWeekdays),
+          trafficSchedule: { scheduleTimezoneOffsetMinutes, peakWindows, peakWeekdays },
         }, requestId)
       } catch (error) {
         ctx.logger.warn(error)

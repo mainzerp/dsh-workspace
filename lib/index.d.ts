@@ -7,6 +7,7 @@ export interface Config {
     apiKey?: string;
     apiKeyEnv?: string;
     timezoneOffsetMinutes?: number;
+    scheduleTimezoneOffsetMinutes?: number;
     balanceTimeoutMs?: number;
     inspectConcurrency?: number;
     peakWindows?: number[][];

@@ -118,7 +118,8 @@ export interface UsageSnapshot {
   balance: BalanceSnapshot
   ratePeriod: 'idle' | 'peak'
   trafficSchedule: {
-    timezoneOffsetMinutes: number
+    /** Offset in which peakWindows/peakWeekdays are evaluated: 0 = UTC, the documented rule. */
+    scheduleTimezoneOffsetMinutes: number
     peakWindows: readonly (readonly [number, number])[]
     peakWeekdays: readonly number[]
   }

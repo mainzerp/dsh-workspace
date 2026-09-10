@@ -92,8 +92,9 @@ The plugin works with zero configuration. The following options can be set in th
 | --- | --- | --- |
 | `baseUrl` | `https://api.deepseek.com` | DeepSeek API base URL |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | Env name of the API key resolved via `ctx.credentials` |
-| `timezoneOffsetMinutes` | `0` | Minutes east of UTC used for the usage "today" boundary and as the billing-schedule timezone in which peak windows and peak weekdays are evaluated |
-| `peakWindows` | `[[60, 240], [360, 600]]` | Peak billing windows in local-day minutes (default: 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday) |
+| `timezoneOffsetMinutes` | `0` | Minutes east of UTC used for the usage "today" boundary |
+| `scheduleTimezoneOffsetMinutes` | `0` | Minutes east of UTC in which `peakWindows` and `peakWeekdays` are evaluated. The default `0` is UTC, which is exactly DeepSeek's published rule; raise it only if your contract states the windows in local time. It is independent of `timezoneOffsetMinutes`, so the day boundary and the billing schedule cannot drift apart |
+| `peakWindows` | `[[60, 240], [360, 600]]` | Peak billing windows in minutes of the `scheduleTimezoneOffsetMinutes` day (default: 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday) |
 | `peakWeekdays` | `[1, 2, 3, 4, 5]` | Peak weekdays, `0` = Sunday through `6` = Saturday; default Monday through Friday |
 | `projectRoot` | — | Absolute project root to preview; defaults to the session working directory |
 | `allowRemote` | `false` | Allow non-loopback access to the plugin endpoints. Warning: also exposes remote file write within `projectRoot` and the terminal. The loopback check trusts `req.socket.remoteAddress`, so it cannot be relied on behind a reverse proxy |
