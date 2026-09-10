@@ -106,6 +106,7 @@ The plugin works with zero configuration. The following options can be set in th
 | `ERR_PNPM_IGNORED_BUILDS` | pnpm rejects the `node-pty` native build script | Add `node-pty` to `allowBuilds` in the profile `pnpm-workspace.yaml` and reinstall |
 | `Cannot find package '...'` | Dependencies not hoisted under a strict pnpm layout | Set `nodeLinker: hoisted` in the profile `pnpm-workspace.yaml` and reinstall |
 | Today's cost always shows the estimate | Authentication failed on platform.deepseek.com | Make sure the key behind `apiKeyEnv` is valid there; the plugin falls back to the estimate automatically |
+| The sidebar figures lag by up to 30 s | The summary endpoint is polled every 30 s | Expected; since v1.1.2 a poll only re-reads the session logs whose revision changed, so the cadence no longer costs CPU or memory |
 
 ## FAQ
 

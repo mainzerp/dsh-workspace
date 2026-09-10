@@ -7,9 +7,11 @@ import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { aggregateToday } from './aggregate.js'
+import { aggregateUsage, logUsage, todayStart } from './aggregate.js'
+import type { LogUsage } from './aggregate.js'
+import { selectStaleSnapshots } from './usage-cache.js'
+import type { CachedUsage } from './usage-cache.js'
 import { fetchBalance } from './balance.js'
 import { ProjectBrowser } from './project-browser.js'
 import { trafficPeriodAt } from './schedule.js'
@@ -190,16 +192,32 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: `${resource} is restricted to local requests by default`, fields: [], requestId }, requestId); return false }
     return true
   }
-  let cachedSignature: string | undefined
-  let cachedLogs: readonly (readonly SessionEvent[])[] = []
-  const readLogs = async (): Promise<readonly (readonly SessionEvent[])[]> => {
+  let usageCache = new Map<string, CachedUsage>()
+  /**
+   * Fold the durable session corpus into per-log usage contributions.
+   *
+   * Only logs whose revision (or day window) changed since the last poll are
+   * inspected; the rest are served from the cache. Inspections run in bounded
+   * chunks rather than one corpus-wide batch, so the peak number of live event
+   * arrays stays at `inspectConcurrency` instead of every session at once.
+   * @param startTime current local-day start.
+   * @param now current epoch milliseconds.
+   * @returns one contribution per durable session.
+   */
+  const readUsage = async (startTime: number, now: number): Promise<readonly LogUsage[]> => {
     const snapshots = await ctx.sessionPersistence.listSnapshots()
-    const signature = JSON.stringify(snapshots.map(snapshot => [snapshot.header.id, snapshot.revision]))
-    if (signature === cachedSignature) return cachedLogs
-    const inspections = await mapConcurrent(snapshots, inspectConcurrency, snapshot => ctx.sessionPersistence.inspect(snapshot.header.id))
-    cachedSignature = signature
-    cachedLogs = inspections.map(inspection => inspection.events)
-    return cachedLogs
+    const { hits, stale } = selectStaleSnapshots(snapshots, usageCache, startTime)
+    for (let index = 0; index < stale.length; index += inspectConcurrency) {
+      const chunk = stale.slice(index, index + inspectConcurrency)
+      const inspections = await mapConcurrent(chunk, inspectConcurrency, snapshot => ctx.sessionPersistence.inspect(snapshot.header.id))
+      chunk.forEach((snapshot, offset) => {
+        const inspection = inspections[offset]
+        if (inspection === undefined) return
+        hits.set(snapshot.header.id, { revision: snapshot.revision, startTime, usage: logUsage(inspection.events, startTime, now) })
+      })
+    }
+    usageCache = hits
+    return [...hits.values()].map(entry => entry.usage)
   }
 
   const register = (path: string, read: (project: ProjectBrowser, url: URL) => Promise<unknown>): void => {
@@ -292,12 +310,13 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (config.allowRemote !== true && !isLoopback(req)) { sendJson(res, 403, { status: 403, reason: 'FORBIDDEN', message: 'Usage data is restricted to local requests by default', fields: [], requestId }, requestId); return }
       try {
         const now = Date.now()
+        const startTime = todayStart(now, timezoneOffsetMinutes)
         const resolvedApiKey = config.apiKey ?? (await ctx.credentials.resolve(apiKeyRef))?.value
-        const [logs, balance] = await Promise.all([
-          readLogs(),
+        const [usages, balance] = await Promise.all([
+          readUsage(startTime, now),
           fetchBalance(resolvedApiKey, baseUrl, AbortSignal.timeout(balanceTimeoutMs)),
         ])
-        const usage = aggregateToday(logs, now, timezoneOffsetMinutes)
+        const usage = aggregateUsage(usages, now, startTime)
         sendJson(res, 200, {
           generatedAt: Math.floor(now / 1000),
           usage: { ...usage, startTime: Math.floor(usage.startTime / 1000), endTime: Math.floor(usage.endTime / 1000) },
