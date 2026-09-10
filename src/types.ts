@@ -120,6 +120,7 @@ export interface UsageSnapshot {
   trafficSchedule: {
     timezoneOffsetMinutes: number
     peakWindows: readonly (readonly [number, number])[]
+    peakWeekdays: readonly number[]
   }
 }
 

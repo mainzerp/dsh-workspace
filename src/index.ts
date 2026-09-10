@@ -14,7 +14,7 @@ import { selectStaleSnapshots } from './usage-cache.js'
 import type { CachedUsage } from './usage-cache.js'
 import { fetchBalance } from './balance.js'
 import { ProjectBrowser } from './project-browser.js'
-import { trafficPeriodAt } from './schedule.js'
+import { DEFAULT_PEAK_WEEKDAYS, DEFAULT_PEAK_WINDOWS, trafficPeriodAt } from './schedule.js'
 import type { WorkspaceClientConfig } from './types.js'
 
 export type * from './types.js'
@@ -28,6 +28,7 @@ export interface Config {
   balanceTimeoutMs?: number
   inspectConcurrency?: number
   peakWindows?: number[][]
+  peakWeekdays?: number[]
   projectRoot?: string
   projectMaxEntries?: number
   projectMaxFileBytes?: number
@@ -35,6 +36,10 @@ export interface Config {
   allowRemote?: boolean
   language?: 'auto' | 'de' | 'en'
 }
+
+/** Config-shaped copies of the documented defaults (see DEFAULT_PEAK_WINDOWS/WEEKDAYS). */
+const PEAK_WINDOWS_DEFAULT: number[][] = DEFAULT_PEAK_WINDOWS.map(([start, end]) => [start, end])
+const PEAK_WEEKDAYS_DEFAULT: number[] = [...DEFAULT_PEAK_WEEKDAYS]
 
 /** Loader-time configuration validation and defaults. */
 export const Config: z<Config> = z.object({
@@ -44,7 +49,8 @@ export const Config: z<Config> = z.object({
   timezoneOffsetMinutes: z.number().step(1).min(-720).max(840).default(0),
   balanceTimeoutMs: z.number().step(1).min(1).max(60_000).default(5_000),
   inspectConcurrency: z.number().step(1).min(1).max(64).default(8),
-  peakWindows: z.array(z.array(z.number().step(1).min(0).max(1_440))).default([[540, 720], [840, 1_080]]),
+  peakWindows: z.array(z.array(z.number().step(1).min(0).max(1_440))).default(PEAK_WINDOWS_DEFAULT),
+  peakWeekdays: z.array(z.number().step(1).min(0).max(6)).default(PEAK_WEEKDAYS_DEFAULT),
   projectRoot: z.string(),
   projectMaxEntries: z.number().step(1).min(100).max(20_000).default(2_000),
   projectMaxFileBytes: z.number().step(1).min(1_024).max(2_000_000).default(200_000),
@@ -126,7 +132,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   const timezoneOffsetMinutes = config.timezoneOffsetMinutes ?? 0
   const balanceTimeoutMs = config.balanceTimeoutMs ?? 5_000
   const inspectConcurrency = config.inspectConcurrency ?? 8
-  const peakWindows: [number, number][] = (config.peakWindows ?? [[540, 720], [840, 1_080]]).map(pair => [pair[0], pair[1]] as [number, number])
+  const peakWindows: [number, number][] = (config.peakWindows ?? PEAK_WINDOWS_DEFAULT).map(pair => [pair[0], pair[1]] as [number, number])
+  const peakWeekdays: readonly number[] = config.peakWeekdays ?? [...PEAK_WEEKDAYS_DEFAULT]
   const maxEntries = config.projectMaxEntries ?? 2_000
   const maxFileBytes = config.projectMaxFileBytes ?? 200_000
   const language = config.language ?? 'auto'
@@ -140,6 +147,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   for (const pair of peakWindows) {
     const start = pair[0]; const end = pair[1]
     if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > 1_440 || end < 0 || end > 1_440 || start === end) throw new Error('dsh-workspace: each peakWindow must be an integer [start, end] pair from 0 through 1440 with start !== end')
+  }
+  if (!Array.isArray(peakWeekdays) || peakWeekdays.length === 0) throw new Error('dsh-workspace: peakWeekdays must be a non-empty array of weekday numbers')
+  for (const day of peakWeekdays) {
+    if (!Number.isInteger(day) || day < 0 || day > 6) throw new Error('dsh-workspace: each peakWeekday must be an integer from 0 (Sunday) through 6 (Saturday)')
   }
   if (!Number.isInteger(maxEntries) || maxEntries < 100 || maxEntries > 20_000) throw new Error('dsh-workspace: projectMaxEntries must be an integer from 100 through 20000')
   if (!Number.isInteger(maxFileBytes) || maxFileBytes < 1_024 || maxFileBytes > 2_000_000) throw new Error('dsh-workspace: projectMaxFileBytes must be an integer from 1024 through 2000000')
@@ -321,8 +332,8 @@ export function apply(ctx: Context, config: Config = {}): void {
           generatedAt: Math.floor(now / 1000),
           usage: { ...usage, startTime: Math.floor(usage.startTime / 1000), endTime: Math.floor(usage.endTime / 1000) },
           balance,
-          ratePeriod: trafficPeriodAt(now, timezoneOffsetMinutes, peakWindows),
-          trafficSchedule: { timezoneOffsetMinutes, peakWindows },
+          ratePeriod: trafficPeriodAt(now, timezoneOffsetMinutes, peakWindows, peakWeekdays),
+          trafficSchedule: { timezoneOffsetMinutes, peakWindows, peakWeekdays },
         }, requestId)
       } catch (error) {
         ctx.logger.warn(error)
