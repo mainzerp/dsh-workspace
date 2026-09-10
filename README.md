@@ -30,7 +30,7 @@
 **Project workspace panel**
 
 - A right-side panel previews the current session's project: file tree with type-aware icons, Git working-tree changes, per-file diff, and commit history as an interactive git graph (all branches, branch/tag badges, click a commit for its diff)
-- The panel collapses to a 44px icon rail on the right edge (Explorer, Source Control, Terminal); clicking a rail icon expands the panel and switches to that view. The collapsed state and the dragged width persist across reloads in `localStorage`
+- The panel collapses to a single floating button in the top-right corner of the chat area and then occupies no space at all; expanding it restores the last active view (files, changes, or terminal). The collapsed state and the dragged width persist across reloads in `localStorage`
 - Text files can be edited in place (CodeMirror editor) and files can be uploaded into the project root; overwriting an existing upload requires confirmation
 - Strictly confined to `projectRoot`; path traversal and out-of-root symlinks are rejected, writes are atomic, and files larger than `projectMaxFileBytes` cannot be saved
 - Skips `.git`, `node_modules`, `dist`, `lib`, `coverage`, `.next`, `.cache`
@@ -131,7 +131,7 @@ A: Project data is loopback-only by default; other browsers get a 403. If you re
 - Uploads always land in the project root (basename only, no nested paths) and replace existing files only after confirmation
 - Depends on the `node-pty` native module; see Troubleshooting if platform builds fail
 - The collapsed state and the panel width are stored in the browser's `localStorage`; clearing site data resets the panel to expanded at its default width
-- The panel reserves space in the chat column only at viewport widths of 1100px or more; below that it overlays the content
+- The expanded panel reserves space in the chat column only at viewport widths of 1100px or more; below that it overlays the content. The collapsed panel reserves nothing at any width and only the floating expand button floats over the chat
 
 ## License
 

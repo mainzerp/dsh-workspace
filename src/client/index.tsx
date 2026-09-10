@@ -36,7 +36,7 @@ import yamlLang from 'highlight.js/lib/languages/yaml'
 import type { GitCommitPreview, GitDiffPreview, GitLogEntry, GitLogPreview, GitLogRef, ProjectFilePreview, ProjectFileWriteResult, ProjectSnapshot, UsageSnapshot, WorkspaceClientConfig } from '../types.js'
 import { setLanguage, t } from './i18n.js'
 import { computeGraphLayout, GRAPH_LANE_WIDTH, GRAPH_ROW_HEIGHT, LANE_PALETTE } from './graph.js'
-import { clampDrawerWidth, readDrawerCollapsed, readDrawerWidth, resolveDrawerWidth, writeDrawerCollapsed, writeDrawerWidth } from './drawer.js'
+import { clampDrawerWidth, getDrawerCollapsedSnapshot, readDrawerCollapsed, readDrawerWidth, resolveDrawerWidth, subscribeDrawerCollapsed, writeDrawerCollapsed, writeDrawerWidth } from './drawer.js'
 import { computeDayBar, DAYBAR_TICKS } from './daybar.js'
 
 const HIGHLIGHT_LANGUAGES: ReadonlyArray<readonly [string, LanguageFn]> = [
@@ -371,6 +371,9 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
   const [error, setError] = useState<string | null>(null)
   const [drawerWidth, setDrawerWidth] = useState<number | null>(() => (typeof window === 'undefined' ? null : readDrawerWidth(window.innerWidth)))
   const [collapsed, setCollapsed] = useState<boolean>(readDrawerCollapsed)
+  // The floating expand button lives in a second slot registration; the store is the shared truth.
+  const storedCollapsed = useSyncExternalStore(subscribeDrawerCollapsed, getDrawerCollapsedSnapshot)
+  useEffect(() => { setCollapsed(storedCollapsed) }, [storedCollapsed])
   const effectiveWidth = resolveDrawerWidth(collapsed, drawerWidth, selected)
   useEffect(() => {
     const root = document.documentElement
@@ -591,21 +594,9 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
   }, [uploadFile])
   const applyCollapsed = useCallback((next: boolean) => {
     writeDrawerCollapsed(next)
-    setCollapsed(next)
-  }, [])
-  const expandToView = useCallback((next: 'files' | 'changes' | 'terminal') => {
-    setMode(next)
-    writeDrawerCollapsed(false)
-    setCollapsed(false)
   }, [])
   return <aside className="hui-drawer" data-collapsed={collapsed || undefined} aria-label={t.projectPreview} style={effectiveWidth === null ? undefined : { width: effectiveWidth }}>
     {collapsed ? null : <div className="hui-resizer" aria-hidden="true" onPointerDown={startResize} />}
-    {collapsed ? <nav className="hui-activity hui-rail" aria-label={t.projectViews}>
-      <button type="button" aria-label={t.explorer} title={t.explorer} onClick={() => expandToView('files')}><FolderTree size={20} /></button>
-      <button type="button" aria-label={t.sourceControl} title={t.sourceControl} onClick={() => expandToView('changes')}><GitBranch size={20} />{snapshot?.changes.length ? <b>{snapshot.changes.length}</b> : null}</button>
-      <button type="button" aria-label={t.terminal} title={t.terminal} onClick={() => expandToView('terminal')}><Terminal size={20} /></button>
-      <button type="button" className="hui-rail-toggle" aria-label={t.expandDrawer} title={t.expandDrawer} onClick={() => applyCollapsed(false)}><PanelRightOpen size={20} /></button>
-    </nav> : null}
     <header className="hui-titlebar"><div><span className="hui-vscode-mark"><Blocks size={14} /></span><span title={snapshot?.rootPath}>{snapshot?.rootPath ?? t.loadingCurrentProject}</span></div><button type="button" aria-label={t.collapseDrawer} title={t.collapseDrawer} onClick={() => applyCollapsed(true)}><PanelRightClose size={14} /></button></header>
     {error ? <div className="hui-error">{error}<button type="button" onClick={() => setError(null)} aria-label={t.dismiss} title={t.dismiss}><X size={12} /></button></div> : null}
     {notice ? <div className="hui-notice">{notice}<button type="button" onClick={() => setNotice(null)} aria-label={t.dismiss} title={t.dismiss}><X size={12} /></button></div> : null}
@@ -665,6 +656,20 @@ function ProjectDrawer({ sessionId, cwd }: { sessionId: string | undefined; cwd:
   </aside>
 }
 
+/**
+ * Floating expand control for the collapsed project panel.
+ *
+ * Registered into `shell.overlay` because the panel itself is mounted in the sidebar
+ * footer: only a second mount can place a control in the chat area, and the overlay
+ * layer is click-through for everything except its own direct children. The button is
+ * the component root on purpose - slot wrappers are `display:contents`.
+ */
+function DrawerExpandToggle() {
+  const collapsed = useSyncExternalStore(subscribeDrawerCollapsed, getDrawerCollapsedSnapshot)
+  if (!collapsed) return null
+  return <button type="button" className="hui-drawer-toggle" aria-label={t.expandDrawer} title={t.expandDrawer} onClick={() => writeDrawerCollapsed(false)}><PanelRightOpen size={16} /></button>
+}
+
 function formatMoney(value: number, currency: string): string {
   if (!Number.isFinite(value)) return '\u2014'
   try { return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value) } catch { return `${currency} ${value.toFixed(2)}` }
@@ -717,8 +722,8 @@ const BASE_STYLES = `
 .hui-explorer{display:flex;min-width:0;min-height:0;flex-direction:column;border-right:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-base,#f8f8f8)}.hui-explorer>header{display:flex;align-items:center;justify-content:space-between;height:42px;padding:0 10px 0 16px}.hui-explorer>header strong{font-size:11px;font-weight:400;letter-spacing:.6px;text-transform:uppercase}.hui-section-title{display:flex;align-items:center;height:23px;padding:0 8px 0 4px;background:var(--dsw-alias-interactive-bg-hover,#e8e8e8);font-size:11px;user-select:none;cursor:pointer}.hui-section-title>svg{flex:none}.hui-section-title>b{overflow:hidden;flex:1;text-overflow:ellipsis;white-space:nowrap}.hui-section-title>em{display:grid;min-width:17px;height:17px;padding:0 4px;place-items:center;border-radius:9px;background:var(--dsw-alias-label-tertiary,#858585);color:var(--dsw-alias-bg-base,#fff);font-size:9px;font-style:normal}.hui-tree{min-height:0;overflow-y:auto;overflow-x:hidden;padding:3px 0 10px}.hui-terminal{display:flex;min-width:0;min-height:0;flex:1;flex-direction:column;background:var(--dsw-alias-bg-base,#f8f8f8);color:var(--dsw-alias-label-primary,#172033);font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:12px;line-height:1.6}.hui-term-toolbar{display:flex;align-items:center;justify-content:space-between;height:31px;padding:0 8px;border-bottom:1px solid var(--dsw-alias-border-l2,#e4e8f0);background:var(--dsw-alias-bg-module-platform,#fafbfc);color:var(--dsw-alias-label-secondary,#6c768a);font-size:11px;user-select:none}.hui-term-toolbar>span{display:flex;align-items:center;gap:5px}.hui-term-actions{display:flex;align-items:center;gap:2px}.hui-term-toolbar button{display:grid;width:20px;height:20px;place-items:center;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer}.hui-term-toolbar button:hover{background:var(--dsw-alias-interactive-bg-hover,#eef0f4);color:var(--dsw-alias-label-primary,#172033)}.hui-term-screen{position:relative;min-width:0;min-height:0;flex:1;overflow:hidden;padding:4px 0 4px 6px}.hui-term-screen .xterm{height:100%}.hui-term-screen .xterm-viewport{overflow-y:auto}.hui-term-screen .xterm-rows{color:inherit}
 .hui-tree-row{display:flex;width:100%;height:23px;align-items:center;gap:4px;padding:0 8px;overflow:hidden;border:0;background:transparent;color:inherit;text-align:left;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:default}.hui-tree-open{display:flex;flex:1;min-width:0;align-items:center;gap:4px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:default}.hui-tree-open>svg{flex:none;color:var(--dsw-alias-label-secondary,#6c768a)}.hui-tree-open>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hui-tree-at{flex:none;display:none;width:18px;height:18px;padding:0;place-items:center;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-success,#16895a);cursor:pointer}.hui-tree-row:hover .hui-tree-at,.hui-tree-row[data-selected] .hui-tree-at{display:grid}.hui-tree-at:hover{background:var(--dsw-alias-interactive-bg-hover,#e8e8e8);color:var(--dsw-alias-label-success,#16895a)}.hui-tree-row:hover{background:var(--dsw-alias-interactive-bg-hover,#e8e8e8)}.hui-tree-row[data-selected]{background:#007acc26;outline:1px solid #007acc55;outline-offset:-1px}.hui-tree-row>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hui-tree-row>svg{flex:none;color:var(--dsw-alias-label-secondary,#6c768a)}.hui-tree-row>.hui-folder-icon{color:var(--dsw-alias-label-warning,#dcb67a)}.hui-chevron{display:flex;width:14px;flex:none;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary,#666)}.hui-change{padding-left:12px;cursor:pointer}.hui-change>span:first-child{overflow:hidden;min-width:0;text-overflow:ellipsis;white-space:nowrap}.hui-change>small{overflow:hidden;flex:1;color:var(--dsw-alias-label-tertiary,#858585);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.hui-change>b{margin-left:auto;color:#d19a66;font-size:10px}.hui-change>b[data-status^=M]{color:#d7ba7d}.hui-change>b[data-status^=A],.hui-change>b[data-status^=?]{color:#73c991}.hui-change>b[data-status^=D]{color:#f48771}.hui-tree>p,.hui-empty-small{padding:12px 16px;color:var(--dsw-alias-label-tertiary,#858585);font-size:11px;line-height:1.5}
 .hui-editor{display:flex;min-width:0;min-height:0;flex-direction:column;background:var(--dsw-alias-bg-module-platform,#fff)}.hui-editor-tabs{height:35px;flex:none;border-bottom:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-base,#f3f3f3)}.hui-editor-tab{display:flex;width:min(190px,80%);height:35px;align-items:center;gap:5px;padding:0 10px;border-top:1px solid #007acc;border-right:1px solid var(--dsw-alias-border-l2,#dedede);background:var(--dsw-alias-bg-module-platform,#fff);font-size:11px}.hui-breadcrumbs{display:flex;height:26px;align-items:center;gap:3px;padding:0 10px;overflow:hidden;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);color:var(--dsw-alias-label-secondary,#666);font-size:10px;white-space:nowrap}.hui-breadcrumbs span{display:flex;align-items:center;gap:3px}.hui-breadcrumbs svg{flex:none;color:var(--dsw-alias-label-tertiary,#999)}.hui-statusbar{display:flex;height:22px;flex:none;align-items:center;justify-content:space-between;padding:0 9px;background:#007acc;color:#fff;font-size:10px}.hui-error{position:absolute;z-index:2;top:40px;right:0;left:44px;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:7px 10px;background:#b42318;color:#fff;font-size:11px}.hui-error>button{display:grid;width:18px;height:18px;flex:none;place-items:center;padding:0;border:0;border-radius:4px;background:transparent;color:#fff;cursor:pointer}.hui-error>button:hover{background:rgb(255 255 255/.2)}
-.hui-change>b[data-status="??"]{color:#73c991}@media(min-width:1100px){div:has(>[data-shell-overlay]):has(.hui-drawer){box-sizing:border-box;padding-right:var(--hui-drawer-width,clamp(600px,46vw,780px))}}@media(max-width:1099px){.hui-drawer{width:min(100vw,780px)}}@media(max-width:650px){.hui-workbench{grid-template-columns:42px minmax(0,1fr)}.hui-workbench[data-preview]{grid-template-columns:42px 210px minmax(280px,1fr)}.hui-drawer{overflow:auto}.hui-workbench{min-width:620px}}
-.hui-drawer{box-sizing:border-box}.hui-rail{display:flex;flex:1;flex-direction:column;align-items:stretch;border-right:0}.hui-drawer[data-collapsed]>:not(.hui-rail){display:none}.hui-drawer[data-collapsed] .hui-rail .hui-rail-toggle{margin-top:auto;border-top:1px solid var(--dsw-alias-border-l2,#dedede)}
+.hui-change>b[data-status="??"]{color:#73c991}@media(min-width:1100px){div:has(>[data-shell-overlay]):has(.hui-drawer){box-sizing:border-box;padding-right:var(--hui-drawer-width,clamp(600px,46vw,780px))}div:has(>[data-shell-overlay]):has(.hui-drawer[data-collapsed]){padding-right:0}}@media(max-width:1099px){.hui-drawer{width:min(100vw,780px)}}@media(max-width:650px){.hui-workbench{grid-template-columns:42px minmax(0,1fr)}.hui-workbench[data-preview]{grid-template-columns:42px 210px minmax(280px,1fr)}.hui-drawer{overflow:auto}.hui-workbench{min-width:620px}}
+.hui-drawer{box-sizing:border-box}.hui-drawer[data-collapsed]{display:none}:where(.hui-drawer-toggle){position:fixed;top:10px;right:10px;z-index:40;display:grid;grid-auto-flow:column;width:32px;height:32px;padding:0;place-items:center;border:1px solid var(--dsw-alias-border-l1,#c7ccd5);border-radius:8px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-secondary,#6c768a);box-shadow:0 1px 3px rgb(15 23 42/.12);cursor:pointer;pointer-events:auto}:where(.hui-drawer-toggle:hover){background:var(--dsw-alias-interactive-bg-hover,#eef0f4);color:var(--dsw-alias-label-primary,#172033)}
 `
 
 const FLAT_STYLES = `
@@ -766,5 +771,6 @@ export async function apply(ctx: ClientContext): Promise<void> {
   }, 'dsh-workspace: styles')
   const Summary = ({ wide }: { wide: boolean }) => <HarnessSummary wide={wide} sessions={ctx.sessions} />
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-workspace', order: 10 }, Summary))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-workspace-drawer-toggle', order: 100 }, DrawerExpandToggle))
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({ name: 'conversation.composer.dock', id: 'dsh-workspace-file-at', order: 100 }, ComposerBridge))
 }

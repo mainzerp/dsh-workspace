@@ -1,4 +1,8 @@
-/** Outer width of the collapsed drawer rail; must match .hui-rail geometry in BASE_STYLES. */
+/**
+ * Width the collapsed panel would occupy if it were rendered; the collapsed panel is
+ * `display:none` and the shell reserves nothing, so this value only feeds the (hidden)
+ * inline width. Keep it in sync with the aside's box model.
+ */
 export const DRAWER_COLLAPSED_WIDTH = 44
 /** Expanded width when nothing is selected and no width was dragged. */
 export const DRAWER_DEFAULT_WIDTH = 400
@@ -34,6 +38,37 @@ export function parseDrawerCollapsed(raw: string | null): boolean {
   return raw === '1'
 }
 
+/**
+ * Subscribers of the collapse flag.
+ *
+ * The panel is mounted in the sidebar (`sidebar.footer.action`) while the floating
+ * expand button is mounted in `shell.overlay` - two separate plugin subtrees. A
+ * `StorageEvent` cannot bridge them because it never fires for same-document
+ * writes, so this module-level registry is the bridge.
+ */
+const collapsedSubscribers = new Set<() => void>()
+/** Last value handed to subscribers; null until the first read or write. */
+let collapsedSnapshot: boolean | null = null
+
+/** Notifies subscribers; every write path funnels through here. */
+function emitDrawerCollapsed(): void {
+  for (const subscriber of [...collapsedSubscribers]) {
+    try { subscriber() } catch { /* a subscriber must not break the write path */ }
+  }
+}
+
+/** Current collapse flag for `useSyncExternalStore`; the returned primitive is identity-stable. */
+export function getDrawerCollapsedSnapshot(): boolean {
+  if (collapsedSnapshot === null) collapsedSnapshot = readDrawerCollapsed()
+  return collapsedSnapshot
+}
+
+/** Subscribes to collapse-flag changes; returns the unsubscribe function. */
+export function subscribeDrawerCollapsed(subscriber: () => void): () => void {
+  collapsedSubscribers.add(subscriber)
+  return () => { collapsedSubscribers.delete(subscriber) }
+}
+
 /** Reads and clamps the stored width; returns null when storage is unavailable or empty. */
 export function readDrawerWidth(viewportWidth: number): number | null {
   try {
@@ -59,10 +94,13 @@ export function writeDrawerWidth(width: number): void {
   } catch { /* storage unavailable */ }
 }
 
-/** Persists the collapse flag; silently no-ops when storage is unavailable. */
+/** Persists the collapse flag and notifies subscribers; no-ops without storage. */
 export function writeDrawerCollapsed(collapsed: boolean): void {
   try {
     if (typeof window === 'undefined') return
+    const previous = collapsedSnapshot === null ? readDrawerCollapsed() : collapsedSnapshot
     window.localStorage.setItem(DRAWER_COLLAPSED_KEY, collapsed ? '1' : '0')
+    collapsedSnapshot = collapsed
+    if (previous !== collapsed) emitDrawerCollapsed()
   } catch { /* storage unavailable */ }
 }

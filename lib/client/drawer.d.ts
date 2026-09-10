@@ -1,4 +1,8 @@
-/** Outer width of the collapsed drawer rail; must match .hui-rail geometry in BASE_STYLES. */
+/**
+ * Width the collapsed panel would occupy if it were rendered; the collapsed panel is
+ * `display:none` and the shell reserves nothing, so this value only feeds the (hidden)
+ * inline width. Keep it in sync with the aside's box model.
+ */
 export declare const DRAWER_COLLAPSED_WIDTH = 44;
 /** Expanded width when nothing is selected and no width was dragged. */
 export declare const DRAWER_DEFAULT_WIDTH = 400;
@@ -17,12 +21,16 @@ export declare function resolveDrawerWidth(collapsed: boolean, drawerWidth: numb
 export declare function parseDrawerWidth(raw: string | null): number | null;
 /** Parses a stored collapse flag; anything other than '1' means expanded. */
 export declare function parseDrawerCollapsed(raw: string | null): boolean;
+/** Current collapse flag for `useSyncExternalStore`; the returned primitive is identity-stable. */
+export declare function getDrawerCollapsedSnapshot(): boolean;
+/** Subscribes to collapse-flag changes; returns the unsubscribe function. */
+export declare function subscribeDrawerCollapsed(subscriber: () => void): () => void;
 /** Reads and clamps the stored width; returns null when storage is unavailable or empty. */
 export declare function readDrawerWidth(viewportWidth: number): number | null;
 /** Reads the stored collapse flag; false when storage is unavailable or empty. */
 export declare function readDrawerCollapsed(): boolean;
 /** Persists the width; silently no-ops when storage is unavailable. */
 export declare function writeDrawerWidth(width: number): void;
-/** Persists the collapse flag; silently no-ops when storage is unavailable. */
+/** Persists the collapse flag and notifies subscribers; no-ops without storage. */
 export declare function writeDrawerCollapsed(collapsed: boolean): void;
 //# sourceMappingURL=drawer.d.ts.map
