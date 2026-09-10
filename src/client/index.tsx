@@ -37,7 +37,7 @@ import type { GitCommitPreview, GitDiffPreview, GitLogEntry, GitLogPreview, GitL
 import { setLanguage, t } from './i18n.js'
 import { computeGraphLayout, GRAPH_LANE_WIDTH, GRAPH_ROW_HEIGHT, LANE_PALETTE } from './graph.js'
 import { clampDrawerWidth, getDrawerCollapsedSnapshot, readDrawerCollapsed, readDrawerWidth, resolveDrawerWidth, subscribeDrawerCollapsed, writeDrawerCollapsed, writeDrawerWidth } from './drawer.js'
-import { computeDayBar, DAYBAR_TICKS } from './daybar.js'
+import { computeScheduleBar } from './daybar.js'
 
 const HIGHLIGHT_LANGUAGES: ReadonlyArray<readonly [string, LanguageFn]> = [
   ['bash', bashLang], ['c', cLang], ['cpp', cppLang], ['css', cssLang], ['go', goLang],
@@ -700,9 +700,9 @@ function HarnessSummary({ wide, sessions }: { wide: boolean; sessions: SessionsS
   const balanceTone = Number.isFinite(balanceAmount) && balanceAmount <= lowThreshold ? 'danger' : 'safe'
   const period = snapshot?.ratePeriod ?? 'idle'
   const schedule = snapshot?.trafficSchedule
-  const dayBar = schedule === undefined ? null : computeDayBar(Date.now(), schedule.timezoneOffsetMinutes, schedule.peakWindows, schedule.peakWeekdays)
+  const scheduleBar = schedule === undefined ? null : computeScheduleBar(Date.now(), schedule.timezoneOffsetMinutes, schedule.peakWindows, schedule.peakWeekdays)
   return <div className={`hui-summary${wide ? '' : ' rail'}`}>
-    <div className="hui-summary-main" aria-label={t.balanceStatus} title={snapshot?.balance.error}>{wide ? <span className="hui-content"><span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i />{period === 'idle' ? t.offPeak : t.peak}</span><span className="hui-balance-line"><b data-tone={balanceTone}>{balanceValue}</b></span></span> : <span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i /></span>}{wide && dayBar !== null ? <div className="hui-daybar" role="img" aria-label={t.dayBarSchedule} title={t.dayBarSchedule}>{dayBar.segments.map((segment, index) => <span key={index} className="hui-daybar-peak" style={{ left: `${segment.start * 100}%`, width: `${(segment.end - segment.start) * 100}%` }} />)}{DAYBAR_TICKS.map(fraction => <span key={fraction} className="hui-daybar-tick" style={{ left: `${fraction * 100}%` }} />)}<span className="hui-daybar-marker" style={{ left: `${dayBar.markerFraction * 100}%` }} /></div> : null}</div>
+    <div className="hui-summary-main" aria-label={t.balanceStatus} title={snapshot?.balance.error}>{wide ? <span className="hui-content"><span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i />{period === 'idle' ? t.offPeak : t.peak}</span><span className="hui-balance-line"><b data-tone={balanceTone}>{balanceValue}</b></span></span> : <span className="hui-period" data-period={period} title={period === 'idle' ? t.offPeakBillingPeriod : t.peakBillingPeriod}><i /></span>}{wide && scheduleBar !== null ? <div className="hui-daybar" role="img" aria-label={t.scheduleBarHint} title={t.scheduleBarHint}>{scheduleBar.segments.map((segment, index) => <span key={index} className="hui-daybar-peak" style={{ left: `${segment.start * 100}%`, width: `${(segment.end - segment.start) * 100}%` }} />)}<span className="hui-daybar-marker" style={{ left: `${scheduleBar.markerFraction * 100}%` }} /></div> : null}</div>
     <ProjectDrawer sessionId={sessionId} cwd={cwd} />
   </div>
 }
@@ -754,7 +754,6 @@ const GRAPH_STYLES = `
 const DAYBAR_STYLES = `
 .hui-daybar{position:relative;flex:0 0 100%;width:100%;min-width:0;height:3px;margin-top:5px;overflow:hidden;border-radius:2px;background:var(--dsw-alias-label-success,#16895a)}
 .hui-daybar-peak{position:absolute;top:0;bottom:0;background:var(--dsw-alias-label-error,#d94a4a)}
-.hui-daybar-tick{position:absolute;top:0;bottom:0;width:1px;background:var(--dsw-alias-bg-base,#fff);opacity:.45}
 .hui-daybar-marker{position:absolute;top:0;bottom:0;width:1px;background:var(--dsw-alias-label-primary,#172033)}
 `
 

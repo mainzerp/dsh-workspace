@@ -70,7 +70,7 @@ const en = {
   peak: 'Peak',
   offPeakBillingPeriod: 'Off-peak billing period',
   peakBillingPeriod: 'Peak billing period',
-  dayBarSchedule: 'Today: red segments are peak hours, green is off-peak; the line marks the current time.',
+  scheduleBarHint: 'Rolling 24-hour window (6 hours back to 18 hours ahead): red segments are peak hours, green is off-peak; the line marks the current time.',
   collapseDrawer: 'Collapse project panel',
   expandDrawer: 'Expand project panel',
 }
@@ -142,7 +142,7 @@ const de: Strings = {
   peak: 'Hauptzeit',
   offPeakBillingPeriod: 'Abrechnungszeitraum Nebenzeit',
   peakBillingPeriod: 'Abrechnungszeitraum Hauptzeit',
-  dayBarSchedule: 'Heute: Rote Abschnitte sind Hauptzeit, Grün ist Nebenzeit; die Linie markiert die aktuelle Uhrzeit.',
+  scheduleBarHint: 'Rollierendes 24-Stunden-Fenster (6 Stunden zurück bis 18 Stunden voraus): Rote Abschnitte sind Hauptzeit, Grün ist Nebenzeit; die Linie markiert den aktuellen Zeitpunkt.',
   collapseDrawer: 'Projektbereich einklappen',
   expandDrawer: 'Projektbereich ausklappen',
 }
