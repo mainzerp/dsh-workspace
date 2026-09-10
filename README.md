@@ -7,7 +7,7 @@
 [![Stars](https://img.shields.io/github/stars/mainzerp/dsh-workspace?style=flat-square)](https://github.com/mainzerp/dsh-workspace)
 [![License](https://img.shields.io/github/license/mainzerp/dsh-workspace?style=flat-square)](https://github.com/mainzerp/dsh-workspace)
 
-> A drop-in UI enhancement for DeepSeek Harness (DSH): a subtle USD balance with peak/off-peak indicator in the sidebar, a project file tree with previews, in-place editing and uploads, Git changes & history, and a built-in terminal — no extra config.
+> A drop-in UI enhancement for DeepSeek Harness (DSH): a subtle USD balance with peak/off-peak indicator and a 24-hour schedule bar in the sidebar, a project file tree with previews, in-place editing and uploads, Git changes & history, and a built-in terminal — no extra config.
 
 [Features](#features) · [Screenshots](#screenshots) · [Differences from upstream](#differences-from-upstream) · [Install](#install) · [Configuration](#configuration) · [FAQ](#faq) · [Known limitations](#known-limitations) · [License](#license)
 
@@ -23,7 +23,8 @@
 
 - Subtle live balance (USD, formatted via `Intl.NumberFormat`) in the bottom-left of Harness
 - The balance stays neutral and only turns red when it runs low (≤ $2, or ≤ ¥15 for CNY accounts)
-- Peak/off-peak indicator following DeepSeek's billing schedule (peak 9:00–12:00 and 14:00–18:00 Beijing time)
+- Peak/off-peak indicator following DeepSeek's billing schedule (peak 01:00–04:00 and 06:00–10:00 UTC, Monday through Friday, all other hours off-peak)
+- A 24-hour bar under the balance shows today in the schedule timezone: red segments are peak, green is off-peak, the thin line marks the current time; weekends are off-peak throughout
 - Auto-refreshes every 30s and re-fetches the moment you switch back to the tab
 
 **Project workspace panel**
@@ -54,13 +55,13 @@ This fork diverges from [deepseek-dsh/dsh-workspace](https://github.com/deepseek
 - **No Harness self-update** — the update button, update endpoints, and restart logic were removed. In containerized setups (e.g. Docker), updates belong to the image, not the running process
 - **USD instead of CNY** — the balance prefers the USD entry of your account
 - **Subtler status card** — the balance is displayed in a smaller, neutral style instead of a large colored figure
-- **No cost estimation** — the today's-cost figure (platform bill + local token estimate) was removed; the card shows balance and billing period only
+- **No cost estimation** — the today's-cost figure (platform bill + local token estimate) was removed; the card shows the balance, the billing period, and a schedule bar for today
 
 ## Install
 
 ### Requirements
 
-- DeepSeek Harness (DSH) **0.1.2-rc.1** or newer installed and `dsh web` running — this plugin release (1.1.1) is NOT compatible with DSH 0.1.1.x
+- DeepSeek Harness (DSH) **0.1.2-rc.1** or newer installed and `dsh web` running — this plugin release (1.2.0) is NOT compatible with DSH 0.1.1.x
 - Node.js >= 22 when installing from the repository
 
 | Plugin version | Required DSH version |
@@ -91,8 +92,9 @@ The plugin works with zero configuration. The following options can be set in th
 | --- | --- | --- |
 | `baseUrl` | `https://api.deepseek.com` | DeepSeek API base URL |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | Env name of the API key resolved via `ctx.credentials` |
-| `timezoneOffsetMinutes` | `0` | Minutes east of UTC used for the "today" boundary |
-| `peakWindows` | `[[540, 720], [840, 1080]]` | Peak billing windows in minutes (Beijing time) |
+| `timezoneOffsetMinutes` | `0` | Minutes east of UTC used for the "today" boundary and for the peak-window/schedule-bar timezone |
+| `peakWindows` | `[[60, 240], [360, 600]]` | Peak billing windows in local-day minutes (default: 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday) |
+| `peakWeekdays` | `[1, 2, 3, 4, 5]` | Peak weekdays, `0` = Sunday through `6` = Saturday; default Monday through Friday |
 | `projectRoot` | — | Absolute project root to preview; defaults to the session working directory |
 | `allowRemote` | `false` | Allow non-loopback access to the plugin endpoints. Warning: also exposes remote file write within `projectRoot` and the terminal. The loopback check trusts `req.socket.remoteAddress`, so it cannot be relied on behind a reverse proxy |
 | `language` | `auto` | UI language: `auto` (browser detection), `de`, or `en` |
@@ -105,8 +107,8 @@ The plugin works with zero configuration. The following options can be set in th
 | `[WARN] Issues with peer dependencies found` | Peer deps (`@deepseek-ai/*`, `react`) are provided by the profile | Harmless warning, ignore |
 | `ERR_PNPM_IGNORED_BUILDS` | pnpm rejects the `node-pty` native build script | Add `node-pty` to `allowBuilds` in the profile `pnpm-workspace.yaml` and reinstall |
 | `Cannot find package '...'` | Dependencies not hoisted under a strict pnpm layout | Set `nodeLinker: hoisted` in the profile `pnpm-workspace.yaml` and reinstall |
-| Today's cost always shows the estimate | Authentication failed on platform.deepseek.com | Make sure the key behind `apiKeyEnv` is valid there; the plugin falls back to the estimate automatically |
-| The sidebar figures lag by up to 30 s | The summary endpoint is polled every 30 s | Expected; since v1.1.2 a poll only re-reads the session logs whose revision changed, so the cadence no longer costs CPU or memory |
+| The balance shows `N/A` (German: `k. A.`) | The DeepSeek balance endpoint failed, or the API key is not configured | Check the key behind `apiKeyEnv` on platform.deepseek.com |
+| The sidebar figures lag by up to 30 s | The summary endpoint is polled every 30 s | Expected; since v1.1.2 a poll only re-reads the session logs whose revision changed, so the cadence no longer costs CPU or memory; the day bar's current-time marker moves on the same cadence |
 
 ## FAQ
 
@@ -124,7 +126,7 @@ A: Project data is loopback-only by default; other browsers get a 403. If you re
 
 ## Known limitations
 
-- The peak/off-peak indicator is display-only; it mirrors DeepSeek's billing schedule and does not affect API calls
+- The peak/off-peak indicator and the schedule bar are display-only; they mirror DeepSeek's billing schedule (peak 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday) and do not affect API calls
 - File editing is text-only and capped at `projectMaxFileBytes` (default 200 KB, max 2 MB); binary files and files larger than the limit cannot be edited
 - Uploads always land in the project root (basename only, no nested paths) and replace existing files only after confirmation
 - Depends on the `node-pty` native module; see Troubleshooting if platform builds fail
